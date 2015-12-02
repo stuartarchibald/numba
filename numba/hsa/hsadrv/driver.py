@@ -553,7 +553,7 @@ class MemRegion(HsaWrapper):
         ),
         '_flags': (
             enums.HSA_REGION_INFO_GLOBAL_FLAGS,
-            drvapi.hsa_region_flag_t
+            drvapi.hsa_region_global_flag_t
         ),
         'size': (enums.HSA_REGION_INFO_SIZE,
                  ctypes.c_size_t),
@@ -589,10 +589,16 @@ class MemRegion(HsaWrapper):
     def agent(self):
         return self._owner_agent
 
-    @property
-    def supports_kernargs(self):
+    def supports(self, check_flag):
+        """
+            Determines if a given feature is supported by this MemRegion.
+            Feature flags are found in "./enums.py" under:
+                * hsa_region_global_flag_t
+             Params:
+                check_flag: Feature flag to test
+        """
         if self.kind == 'global':
-            return self._flags & enums.HSA_REGION_GLOBAL_FLAG_KERNARG
+            return self._flags & check_flag
         else:
             return False
 

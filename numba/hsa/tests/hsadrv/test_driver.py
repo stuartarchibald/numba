@@ -7,6 +7,7 @@ import numpy as np
 import numba.unittest_support as unittest
 from numba.hsa.hsadrv.driver import hsa, Queue, Program, Executable, BrigModule
 from numba.hsa.hsadrv import drvapi
+from numba.hsa.hsadrv import enums
 
 
 class TestLowLevelApi(unittest.TestCase):
@@ -104,12 +105,16 @@ class TestMemory(_TestBase):
         # More than one region
         self.assertGreater(len(regions), 0)
         # Find kernel argument regions
-        kernarg_regions = [r for r in regions if r.supports_kernargs]
+        kernarg_regions = list()
+        for r in regions:
+            if r.supports(enums.HSA_REGION_GLOBAL_FLAG_KERNARG):
+                kernarg_regions.append(r)
+
         self.assertGreater(len(kernarg_regions), 0)
         # Test allocating at the kernel argument region
-        kernarg_resgion = kernarg_regions[0]
+        kernarg_region = kernarg_regions[0]
         nelem = 10
-        ptr = kernarg_resgion.allocate(ctypes.c_float * nelem)
+        ptr = kernarg_region.allocate(ctypes.c_float * nelem)
         self.assertNotEqual(ctypes.addressof(ptr), 0,
                             "pointer must not be NULL")
         # # Test writing to it
@@ -119,6 +124,28 @@ class TestMemory(_TestBase):
             self.assertEqual(ptr[i], src[i])
         hsa.hsa_memory_free(ptr)
 
+    def test_coarse_grained_allocate(self):
+        regions = self.gpu.regions
+        coarse_regions = list()
+        for r in regions:
+            if r.supports(enums.HSA_REGION_GLOBAL_FLAG_COARSE_GRAINED):
+                coarse_regions.append(r)
+
+        # check we have 1+ coarse region(s)
+        self.assertGreater(len(coarse_regions), 0)
+        # Test allocating
+        region = coarse_regions[0]
+        nelem = 10
+        ptr = region.allocate(ctypes.c_float * nelem)
+        self.assertNotEqual(ctypes.addressof(ptr), 0,
+                            "pointer must not be NULL")
+        # Test writing to allocated area
+        src = np.random.random(nelem).astype(np.float32)
+        ctypes.memmove(ptr, src.ctypes.data, src.nbytes)
+        for i in range(src.size):
+            self.assertEqual(ptr[i], src[i])
+        # free
+        hsa.hsa_memory_free(ptr)
 
 if __name__ == '__main__':
     unittest.main()
