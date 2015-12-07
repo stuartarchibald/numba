@@ -574,6 +574,17 @@ API_PROTOTYPES = {
         'errcheck': _check_error
     },
 
+    # hsa_status_t HSA_API hsa_memory_copy(
+    #     void * dst,
+    #     const void * src,
+    #     size_t size);
+    'hsa_memory_copy': {
+        'restype': hsa_status_t,
+        'argtypes': [ctypes.c_void_p, ctypes.c_void_p, ctypes.c_size_t],
+        'errcheck': _check_error
+    },
+
+
 
     # Signals ##################################################################
 

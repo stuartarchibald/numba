@@ -8,6 +8,7 @@ import numba.unittest_support as unittest
 from numba.hsa.hsadrv.driver import hsa, Queue, Program, Executable, BrigModule
 from numba.hsa.hsadrv import drvapi
 from numba.hsa.hsadrv import enums
+from numba.hsa.hsadrv import enums_ext
 
 
 class TestLowLevelApi(unittest.TestCase):
@@ -124,28 +125,90 @@ class TestMemory(_TestBase):
             self.assertEqual(ptr[i], src[i])
         hsa.hsa_memory_free(ptr)
 
-    def test_coarse_grained_allocate(self):
-        regions = self.gpu.regions
-        coarse_regions = list()
-        for r in regions:
-            if r.supports(enums.HSA_REGION_GLOBAL_FLAG_COARSE_GRAINED):
-                coarse_regions.append(r)
+    def apu_present():
+        """
+        Returns true if an APU is present on the current machine.
+        """
+        # find the nodes to which the agents claim to belong
+        # if the number of nodes is different to the number of
+        # agents then some agents must share a node
+        nodes=set()
+        for a in hsa.agents:
+            nodes.add(getattr(a, "node"))
+        if(len(hsa.agents) != len(nodes)):
+            return True
+        else:
+            return False
+   
+    def dgpu_count():
+        """
+        Returns the number of discrete GPUs present on the current machine.
+        """       
+        known_dgpus=frozenset([b'Fiji'])
+        known_apus=frozenset([b'Spectre'])
+        known_cpus=frozenset([b'Kaveri'])
 
-        # check we have 1+ coarse region(s)
-        self.assertGreater(len(coarse_regions), 0)
-        # Test allocating
-        region = coarse_regions[0]
+        ngpus = 0
+        for a in hsa.agents:
+            name = getattr(a, "name").lower()
+            for g in known_dgpus:
+                if name.find(g.lower()) > 0:
+                    ngpus += 1
+        return ngpus
+
+
+    @unittest.skipIf(dgpu_count() > 0, "no discrete GPU present")
+    def test_coarse_grained_allocate(self):
+        gpu_regions = self.gpu.regions
+        gpu_only_coarse_regions = list()
+        gpu_host_accessible_coarse_regions = list()
+        for r in gpu_regions:
+            if r.supports(enums.HSA_REGION_GLOBAL_FLAG_COARSE_GRAINED):
+                if r.supports(enums_ext.HSA_AMD_REGION_INFO_HOST_ACCESSIBLE):
+                    gpu_host_accessible_coarse_regsions.append(r)
+                else:
+                    gpu_only_coarse_regions.append(r)
+        # check we have 1+ coarse gpu region(s) of each type
+        self.assertGreater(len(gpu_only_coarse_regions), 0)
+        self.assertGreater(len(gpu_host_accessible_coarse_regions), 0)
+
+        cpu_regions = self.cpu.regions
+        cpu_coarse_regions = list()
+        for r in cpu_regions:
+            if r.supports(enums.HSA_REGION_GLOBAL_FLAG_COARSE_GRAINED):
+                cpu_coarse_regions.append(r)
+        # check we have 1+ coarse cpu region(s)
+        self.assertGreater(len(cpu_coarse_regions), 0)
+
+        # ten elements of data used
         nelem = 10
-        ptr = region.allocate(ctypes.c_float * nelem)
-        self.assertNotEqual(ctypes.addressof(ptr), 0,
-                            "pointer must not be NULL")
+
+        #Test allocating
+        gpu_only_region = gpu_only_coarse_regions[0]
+        gpu_only_ptr = gpu_only_region.allocate(ctypes.c_float * nelem)
+        self.assertNotEqual(ctypes.addressof(gpu_only_ptr), 0, "pointer must not be NULL")
+
+        cpu_region = cpu_coarse_regions[0]
+        cpu_ptr = cpu_region.allocate(ctypes.c_float * nelem)
+        self.assertNotEqual(ctypes.addressof(cpu_ptr), 0, "pointer must not be NULL")
+
         # Test writing to allocated area
         src = np.random.random(nelem).astype(np.float32)
-        ctypes.memmove(ptr, src.ctypes.data, src.nbytes)
+        hsa.hsa_memory_copy(cpu_ptr, src.ctypes.data, src.nbytes)
+        stat = hsa.hsa_memory_copy(gpu_only_ptr, cpu_ptr, src.nbytes)
+
+        # this raw call works
+        # ctypes.memmove(gpu_only_ptr, src.ctypes.data, src.nbytes)
+
         for i in range(src.size):
-            self.assertEqual(ptr[i], src[i])
+            self.assertEqual(cpu_ptr[i], src[i])
+           
+        for i in range(src.size):
+            self.assertEqual(gpu_only_ptr[i], src[i])
+
         # free
-        hsa.hsa_memory_free(ptr)
+        hsa.hsa_memory_free(cpu_ptr)
+        hsa.hsa_memory_free(gpu_only_ptr)
 
 if __name__ == '__main__':
     unittest.main()
