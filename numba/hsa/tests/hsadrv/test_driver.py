@@ -164,10 +164,11 @@ class TestMemory(_TestBase):
         gpu_host_accessible_coarse_regions = list()
         for r in gpu_regions:
             if r.supports(enums.HSA_REGION_GLOBAL_FLAG_COARSE_GRAINED):
-                if r.supports(enums_ext.HSA_AMD_REGION_INFO_HOST_ACCESSIBLE):
-                    gpu_host_accessible_coarse_regsions.append(r)
+                if r.host_accessible:
+                    gpu_host_accessible_coarse_regions.append(r)
                 else:
                     gpu_only_coarse_regions.append(r)
+
         # check we have 1+ coarse gpu region(s) of each type
         self.assertGreater(len(gpu_only_coarse_regions), 0)
         self.assertGreater(len(gpu_host_accessible_coarse_regions), 0)
@@ -183,32 +184,41 @@ class TestMemory(_TestBase):
         # ten elements of data used
         nelem = 10
 
-        #Test allocating
-        gpu_only_region = gpu_only_coarse_regions[0]
-        gpu_only_ptr = gpu_only_region.allocate(ctypes.c_float * nelem)
-        self.assertNotEqual(ctypes.addressof(gpu_only_ptr), 0, "pointer must not be NULL")
-
+        # allocation
         cpu_region = cpu_coarse_regions[0]
         cpu_ptr = cpu_region.allocate(ctypes.c_float * nelem)
         self.assertNotEqual(ctypes.addressof(cpu_ptr), 0, "pointer must not be NULL")
 
+        gpu_only_region = gpu_only_coarse_regions[0]
+        gpu_only_ptr = gpu_only_region.allocate(ctypes.c_float * nelem)
+        self.assertNotEqual(ctypes.addressof(gpu_only_ptr), 0, "pointer must not be NULL")
+
+        gpu_host_accessible_region = gpu_host_accessible_coarse_regions[0]
+        gpu_host_accessible_ptr = gpu_host_accessible_region.allocate(ctypes.c_float * nelem)
+        self.assertNotEqual(ctypes.addressof(gpu_host_accessible_ptr), 0, "pointer must not be NULL")
+
         # Test writing to allocated area
         src = np.random.random(nelem).astype(np.float32)
         hsa.hsa_memory_copy(cpu_ptr, src.ctypes.data, src.nbytes)
-        stat = hsa.hsa_memory_copy(gpu_only_ptr, cpu_ptr, src.nbytes)
+        hsa.hsa_memory_copy(gpu_host_accessible_ptr, cpu_ptr, src.nbytes)
+        hsa.hsa_memory_copy(gpu_only_ptr, gpu_host_accessible_ptr, src.nbytes)
 
         # this raw call works
         # ctypes.memmove(gpu_only_ptr, src.ctypes.data, src.nbytes)
 
         for i in range(src.size):
             self.assertEqual(cpu_ptr[i], src[i])
-           
+
+        for i in range(src.size):
+            self.assertEqual(gpu_host_accessible_ptr[i], src[i])
+
         for i in range(src.size):
             self.assertEqual(gpu_only_ptr[i], src[i])
 
         # free
         hsa.hsa_memory_free(cpu_ptr)
         hsa.hsa_memory_free(gpu_only_ptr)
+        hsa.hsa_memory_free(gpu_host_accessible_ptr)
 
 if __name__ == '__main__':
     unittest.main()

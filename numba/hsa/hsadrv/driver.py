@@ -15,7 +15,7 @@ from numba.utils import total_ordering
 from numba import utils
 from numba import config
 from .error import HsaSupportError, HsaDriverError, HsaApiError
-from . import enums, drvapi
+from . import enums, enums_ext, drvapi
 
 
 class HsaKernelTimedOut(HsaDriverError):
@@ -555,6 +555,8 @@ class MemRegion(HsaWrapper):
             enums.HSA_REGION_INFO_GLOBAL_FLAGS,
             drvapi.hsa_region_global_flag_t
         ),
+        'host_accessible': (enums_ext.HSA_AMD_REGION_INFO_HOST_ACCESSIBLE,
+            ctypes.c_bool),
         'size': (enums.HSA_REGION_INFO_SIZE,
                  ctypes.c_size_t),
         'alloc_max_size': (enums.HSA_REGION_INFO_ALLOC_MAX_SIZE,
