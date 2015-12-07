@@ -152,12 +152,12 @@ class TestMemory(_TestBase):
         for a in hsa.agents:
             name = getattr(a, "name").lower()
             for g in known_dgpus:
-                if name.find(g.lower()) > 0:
+                if name.find(g.lower()) != -1:
                     ngpus += 1
         return ngpus
 
 
-    @unittest.skipIf(dgpu_count() > 0, "no discrete GPU present")
+    @unittest.skipIf(dgpu_count() == 0, "no discrete GPU present")
     def test_coarse_grained_allocate(self):
         gpu_regions = self.gpu.regions
         gpu_only_coarse_regions = list()
