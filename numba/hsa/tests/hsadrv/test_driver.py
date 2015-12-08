@@ -212,8 +212,23 @@ class TestMemory(_TestBase):
         for i in range(src.size):
             self.assertEqual(gpu_host_accessible_ptr[i], src[i])
 
+        # zero out host accessible GPU memory and CPU memory
+        z0 = np.zeros(nelem).astype(np.float32)
+        hsa.hsa_memory_copy(cpu_ptr, z0.ctypes.data, z0.nbytes)
+        hsa.hsa_memory_copy(gpu_host_accessible_ptr, cpu_ptr, z0.nbytes)
+
+        for i in range(z0.size):
+            self.assertEqual(cpu_ptr[i], z0[i])
+
+        for i in range(z0.size):
+            self.assertEqual(gpu_host_accessible_ptr[i], z0[i])
+
+        # copy back the data from the GPU
+        hsa.hsa_memory_copy(gpu_host_accessible_ptr, gpu_only_ptr, src.nbytes)
+
+        # check the copy back is ok
         for i in range(src.size):
-            self.assertEqual(gpu_only_ptr[i], src[i])
+            self.assertEqual(gpu_host_accessible_ptr[i], src[i])
 
         # free
         hsa.hsa_memory_free(cpu_ptr)
