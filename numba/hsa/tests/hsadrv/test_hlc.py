@@ -3,6 +3,7 @@ from __future__ import print_function, absolute_import
 import numba.unittest_support as unittest
 from numba.hsa.hlc import hlc
 from numba.hsa.hsadrv import enums
+from numba.hsa.hsadrv.driver import hsa
 
 SPIR_SAMPLE = """
 ; ModuleID = 'kernel.out.bc'
@@ -45,7 +46,7 @@ class TestHLC(unittest.TestCase):
         self.assertIn("prog kernel &copy", hsail)
 
     def test_brig(self):
-        # Genreate BRIG
+        # Generate BRIG
         hlcmod = hlc.Module()
         hlcmod.load_llvm(SPIR_SAMPLE)
         brig = hlcmod.finalize().brig
