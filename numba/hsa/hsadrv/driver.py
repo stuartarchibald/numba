@@ -371,7 +371,6 @@ class HsaWrapper(object):
                           self.__dict__.keys() +
                           self._hsa_properties.keys()))
 
-
 @total_ordering
 class Agent(HsaWrapper):
     """Abstracts a HSA compute agent.
@@ -926,6 +925,10 @@ class Context(object):
     A context is associated with a component
     """
 
+    """
+    Parameters:
+    agent the agent, and instance of the class Agent
+    """
     def __init__(self, agent):
         self._agent = weakref.proxy(agent)
         qs = agent.queue_max_size
@@ -943,3 +946,45 @@ class Context(object):
     @property
     def agent(self):
         return self._agent
+
+    def memalloc(self, ctypes_type, memTypeFlags=None):
+      """
+      Allocates memory.
+      Parameters:
+      ctypes_type the number of elements scaled on c_type to allocate
+      memTypeFlags the flags for which the memory region must have support
+      """
+        hw = _agent.device()
+        regions = list()
+        if hw == "GPU":
+            for r in _agent:
+                # check user requested flags
+                for flags in memTypeFlags:
+                    if r.supports(memTypeFlags)
+                       # check the mem region is coarse grains
+                       if r.supports(\
+                          enums.HSA_REGION_GLOBAL_FLAG_COARSE_GRAINED):
+                          # and that its GPU only
+                          if not r.host_accessible:
+                              regions.append(r)
+        elif hw == "CPU":
+            for r in _agent:
+              # check user requested flags
+              for flags in memTypeFlags:
+                    if r.supports(memTypeFlags)
+                      # and that it is host accessible
+                      if r.host_accessible:
+                            regions.append(r)
+        else:
+            raise RuntimeError("Unknown device type string \"%s\"" % hw)
+
+        assert len(regions) > 0, "No suitable memory regions found."
+
+        # walk though valid regions trying to malloc until there's none left
+        for region_id in regions:
+            try:
+                mem = MemRegion.instance_for(_agent, region_id).allocate(nbytes)
+            except HsaApiError err:
+                raise RuntimeError("Memory allocation failed. HSA API Error %s"\
+                                    % err.args[0])
+        return mem
