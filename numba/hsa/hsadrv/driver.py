@@ -934,6 +934,7 @@ class Context(object):
         qs = agent.queue_max_size
         defq = self._agent.create_queue_multi(qs, callback=self._callback)
         self._defaultqueue = defq.owned()
+        self.allocations = utils.UniqueDict()
 
     def _callback(self, status, queue):
         drvapi._check_error(status, queue)
@@ -947,44 +948,78 @@ class Context(object):
     def agent(self):
         return self._agent
 
-    def memalloc(self, ctypes_type, memTypeFlags=None):
+    def memalloc(self, ctypes_type, memTypeFlags=None, hostAccessible=True):
       """
       Allocates memory.
       Parameters:
       ctypes_type the number of elements scaled on c_type to allocate
-      memTypeFlags the flags for which the memory region must have support
+      memTypeFlags the flags for which the memory region must have support, due\
+                   to the inherent rawness of the underlying call, the validity\
+                   of the flag is not checked, cf. C language.
+      hostAccessible boolean as to whether the region in which the allocation
+                     takes place should be host accessible
       """
         hw = _agent.device()
         regions = list()
+
+        # TODO : fuse this branching logic
         if hw == "GPU":
             for r in _agent:
                 # check user requested flags
                 for flags in memTypeFlags:
                     if r.supports(memTypeFlags)
-                       # check the mem region is coarse grains
+                       # check the mem region is coarse grained
                        if r.supports(\
                           enums.HSA_REGION_GLOBAL_FLAG_COARSE_GRAINED):
-                          # and that its GPU only
-                          if not r.host_accessible:
-                              regions.append(r)
+                          # check accessibility criteria
+                          if hostAccessible == True:
+                              if r.host_accessible:
+                                  regions.append(r)
+                          elif hostAccessible == False:
+                              if not r.host_accessible:
+                                  regions.append(r)
+                          else:
+                              raise RuntimeError("hostAccessible must be True \
+                                  or False, found %s" % hostAccessible)
         elif hw == "CPU":
             for r in _agent:
               # check user requested flags
               for flags in memTypeFlags:
                     if r.supports(memTypeFlags)
-                      # and that it is host accessible
-                      if r.host_accessible:
-                            regions.append(r)
+                        # check accessibility criteria
+                        if hostAccessible == True:
+                            if r.host_accessible:
+                                regions.append(r)
+                        elif hostAccessible == False:
+                            if not r.host_accessible:
+                                regions.append(r)
+                        else:
+                            raise RuntimeError("hostAccessible must be True \
+                                or False, found %s" % hostAccessible)
         else:
             raise RuntimeError("Unknown device type string \"%s\"" % hw)
 
         assert len(regions) > 0, "No suitable memory regions found."
 
         # walk though valid regions trying to malloc until there's none left
+        mem = None
         for region_id in regions:
             try:
-                mem = MemRegion.instance_for(_agent, region_id).allocate(nbytes)
-            except HsaApiError err:
-                raise RuntimeError("Memory allocation failed. HSA API Error %s"\
-                                    % err.args[0])
+                mem = MemRegion.instance_for(_agent, region_id)\
+                          .allocate(ctypes_type)
+            except HsaApiError: # try next memory region if an allocation fails
+                pass
+            else: # allocation succeeded, stop looking for memory
+                break
+
+        if mem == None:
+            raise RuntimeError("Memory allocation failed. No agent/region \
+              combination could meet allocation restraints \
+              (hardware = %s, size = %s, flags = %s)." % \
+              ( hw, ctypes_type, memTypeFlags))
+
+        # TODO: probably ought to keep a register of
+        # hash[device, ptr] -> allocation
+        # so the register can be walked to free allocated and clean up
+
         return mem
