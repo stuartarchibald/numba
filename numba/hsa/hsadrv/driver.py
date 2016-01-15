@@ -9,13 +9,17 @@ import atexit
 import os
 import ctypes
 import struct
+import traceback
 import weakref
 from collections import Sequence
 from numba.utils import total_ordering
+from numba import mviewbuf
 from numba import utils
 from numba import config
 from .error import HsaSupportError, HsaDriverError, HsaApiError
-from . import enums, drvapi
+from . import enums, enums_ext, drvapi
+from numba.utils import longint as long
+import numpy as np
 
 
 class HsaKernelTimedOut(HsaDriverError):
@@ -145,6 +149,50 @@ class Recycler(object):
     def drain(self):
         self._cleanup()
         self.enabled = False
+
+
+# Known Hardware
+known_dgpus = frozenset([b'Fiji'])
+known_apus = frozenset([b'Spectre'])
+known_cpus = frozenset([b'Kaveri'])
+
+def apu_present():
+    """
+    Returns true if an APU is present on the current machine.
+    """
+    # Find the nodes to which the agents claim to belong.
+    # If the number of nodes is different to the number of
+    # agents then some agents must share a node -> APU!
+    nodes = set()
+    for a in hsa.agents:
+        nodes.add(getattr(a, "node"))
+    return len(hsa.agents) != len(nodes)
+
+
+def dgpu_count():
+    """
+    Returns the number of discrete GPUs present on the current machine.
+
+    This can be overridden by setting the environment variable
+    `NUMBA_HSA_DGPU_PRESENT` to a positive integer.
+    """
+    if config.NUMBA_HSA_DGPU_PRESENT > 0:
+        return config.NUMBA_HSA_DGPU_PRESENT
+    else:
+        ngpus = 0
+        for a in hsa.agents:
+            if a.is_component:
+                name = getattr(a, "name").lower()
+                for g in known_dgpus:
+                    if g.lower() in name:
+                        ngpus += 1
+        return ngpus
+
+def dgpu_present():
+    """
+    Returns true if a dGPU is present in the current machine.
+    """
+    return dgpu_count() > 0
 
 
 # The Driver ###########################################################
@@ -371,7 +419,6 @@ class HsaWrapper(object):
                           self.__dict__.keys() +
                           self._hsa_properties.keys()))
 
-
 @total_ordering
 class Agent(HsaWrapper):
     """Abstracts a HSA compute agent.
@@ -553,8 +600,10 @@ class MemRegion(HsaWrapper):
         ),
         '_flags': (
             enums.HSA_REGION_INFO_GLOBAL_FLAGS,
-            drvapi.hsa_region_flag_t
+            drvapi.hsa_region_global_flag_t
         ),
+        'host_accessible': (enums_ext.HSA_AMD_REGION_INFO_HOST_ACCESSIBLE,
+                            ctypes.c_bool),
         'size': (enums.HSA_REGION_INFO_SIZE,
                  ctypes.c_size_t),
         'alloc_max_size': (enums.HSA_REGION_INFO_ALLOC_MAX_SIZE,
@@ -579,31 +628,36 @@ class MemRegion(HsaWrapper):
         method 'instance_for' to ensure MemRegion identity"""
         self._id = region_id
         self._owner_agent = agent
-        self._kind = self._segment_name_map[self.segment]
+        self._as_parameter_ = self._id
 
     @property
     def kind(self):
-        return self._kind
+        return self._segment_name_map[self.segment]
 
     @property
     def agent(self):
         return self._owner_agent
 
-    @property
-    def supports_kernargs(self):
+    def supports(self, check_flag):
+        """
+            Determines if a given feature is supported by this MemRegion.
+            Feature flags are found in "./enums.py" under:
+                * hsa_region_global_flag_t
+             Params:
+                check_flag: Feature flag to test
+        """
         if self.kind == 'global':
-            return self._flags & enums.HSA_REGION_GLOBAL_FLAG_KERNARG
+            return self._flags & check_flag
         else:
             return False
 
-    def allocate(self, ctypes_type):
+    def allocate(self, nbytes):
         assert self.alloc_allowed
-        alloc_size = ctypes.sizeof(ctypes_type)
-        assert alloc_size <= self.alloc_max_size
+        assert nbytes <= self.alloc_max_size
+        assert nbytes >= 0
         buff = ctypes.c_void_p()
-        hsa.hsa_memory_allocate(self._id, alloc_size,
-                                ctypes.byref(buff))
-        return ctypes_type.from_address(buff.value)
+        hsa.hsa_memory_allocate(self._id, nbytes, ctypes.byref(buff))
+        return buff
 
     def free(self, ptr):
         hsa.hsa_memory_free(ptr)
@@ -682,7 +736,7 @@ class Queue(object):
         packet.kernel_object = symbol.kernel_object
 
         packet.kernarg_address = (0 if kernargs is None
-                                  else ctypes.addressof(kernargs))
+                                  else kernargs.value)
 
         packet.private_segment_size = symbol.private_segment_size
         packet.group_segment_size = symbol.group_segment_size
@@ -791,16 +845,48 @@ class Program(object):
     def __init__(self, model=enums.HSA_MACHINE_MODEL_LARGE,
                  profile=enums.HSA_PROFILE_FULL,
                  rounding_mode=enums.HSA_DEFAULT_FLOAT_ROUNDING_MODE_DEFAULT,
-                 options=None):
+                 options=None, version_major=1, version_minor=0):
         self._id = drvapi.hsa_ext_program_t()
         assert options is None
-        hsa.hsa_ext_program_create(model, profile, rounding_mode,
-                                   options, ctypes.byref(self._id))
+
+        def check_fptr_return(hsa_status):
+            if hsa_status is not enums.HSA_STATUS_SUCCESS:
+                msg = ctypes.c_char_p()
+                hsa.hsa_status_string(hsa_status, ctypes.byref(msg))
+                print(msg.value.decode("utf-8"))
+                exit(-hsa_status)
+
+
+        support = ctypes.c_bool(0)
+        hsa.hsa_system_extension_supported(enums.HSA_EXTENSION_FINALIZER,
+                                           version_major,
+                                           version_minor,
+                                           ctypes.byref(support))
+
+        assert support.value == True, ('HSA system extension %s.%s not supported' %
+                (version_major, version_minor))
+
+        # struct of function pointers
+        self._ftabl = drvapi.hsa_ext_finalizer_1_00_pfn_t()
+
+        # populate struct
+        hsa.hsa_system_get_extension_table(enums.HSA_EXTENSION_FINALIZER,
+                                           version_major,
+                                           version_minor,
+                                           ctypes.byref(self._ftabl))
+
+        ret = self._ftabl.hsa_ext_program_create(model, profile,
+                                    rounding_mode, options,
+                                    ctypes.byref(self._id))
+
+        check_fptr_return(ret)
+
         self._as_parameter_ = self._id
-        utils.finalize(self, hsa.hsa_ext_program_destroy, self._id)
+        utils.finalize(self, self._ftabl.hsa_ext_program_destroy,
+                self._id)
 
     def add_module(self, module):
-        hsa.hsa_ext_program_add_module(self._id, module._id)
+        self._ftabl.hsa_ext_program_add_module(self._id, module._id)
 
     def finalize(self, isa, callconv=0, options=None):
         """
@@ -810,7 +896,7 @@ class Program(object):
         control_directives = drvapi.hsa_ext_control_directives_t()
         ctypes.memset(ctypes.byref(control_directives), 0,
                       ctypes.sizeof(control_directives))
-        hsa.hsa_ext_program_finalize(self._id,
+        self._ftabl.hsa_ext_program_finalize(self._id,
                                      isa,
                                      callconv,
                                      control_directives,
@@ -880,17 +966,93 @@ class Symbol(HsaWrapper):
     def __init__(self, symbol_id):
         self._id = symbol_id
 
+class MemoryPointer(object):
+    __hsa_memory__ = True
+
+    def __init__(self, context, pointer, size, finalizer=None):
+        self.context = context
+        self.device_pointer = pointer
+        self.size = size
+        self._hsa_memsize_ = size
+        self.finalizer = finalizer
+        self.is_managed = finalizer is not None
+        self.is_alive = True
+        self.refct = 0
+
+    def __del__(self):
+        try:
+            if self.is_managed and self.is_alive:
+                self.finalizer()
+        except:
+            traceback.print_exc()
+
+    def own(self):
+        return OwnedPointer(weakref.proxy(self))
+
+    def free(self):
+        """
+        Forces the device memory to the trash.
+        """
+        if self.is_managed:
+            if not self.is_alive:
+                raise RuntimeError("Freeing dead memory")
+            self.finalizer()
+            self.is_alive = False
+
+    def view(self):
+        pointer = self.device_pointer.value
+        view = MemoryPointer(self.context, pointer, self.size)
+        return OwnedPointer(weakref.proxy(self), view)
+
+    @property
+    def device_ctypes_pointer(self):
+        return self.device_pointer
+
+class OwnedPointer(object):
+    def __init__(self, memptr, view=None):
+        self._mem = memptr
+        self._mem.refct += 1
+        if view is None:
+            self._view = self._mem
+        else:
+            assert not view.is_managed
+            self._view = view
+
+    def __del__(self):
+        try:
+            self._mem.refct -= 1
+            assert self._mem.refct >= 0
+            if self._mem.refct == 0:
+                self._mem.free()
+        except ReferenceError:
+            pass
+        except:
+            traceback.print_exc()
+
+    def __getattr__(self, fname):
+        """Proxy MemoryPointer methods
+        """
+        return getattr(self._view, fname)
+
 
 class Context(object):
     """
     A context is associated with a component
     """
 
+    """
+    Parameters:
+    agent the agent, and instance of the class Agent
+    """
     def __init__(self, agent):
         self._agent = weakref.proxy(agent)
-        qs = agent.queue_max_size
-        defq = self._agent.create_queue_multi(qs, callback=self._callback)
-        self._defaultqueue = defq.owned()
+
+        if self._agent.is_component: # only components have queues
+            qs = agent.queue_max_size
+            defq = self._agent.create_queue_multi(qs, callback=self._callback)
+            self._defaultqueue = defq.owned()
+
+        self.allocations = utils.UniqueDict()
 
     def _callback(self, status, queue):
         drvapi._check_error(status, queue)
@@ -903,3 +1065,187 @@ class Context(object):
     @property
     def agent(self):
         return self._agent
+
+    def memalloc(self, nbytes, memTypeFlags=None, hostAccessible=True):
+        """
+        Allocates memory.
+        Parameters:
+        nbytes the number of bytes to allocate.
+        memTypeFlags the flags for which the memory region must have support,\
+                     due to the inherent rawness of the underlying call, the\
+                     validity of the flag is not checked, cf. C language.
+        hostAccessible boolean as to whether the region in which the\
+                       allocation takes place should be host accessible
+        """
+        hw = self._agent.device
+        all_reg = self._agent.regions
+        flag_ok_r = list() # regions which pass the memTypeFlags test
+        regions = list()
+
+        # don't support DSP
+        if hw == "GPU" or hw == "CPU":
+            # check user requested flags
+            if(memTypeFlags is not None):
+                for r in all_reg:
+                    count = 0
+                    for flags in memTypeFlags:
+                        if r.supports(flags):
+                            count += 1
+                    if count == len(memTypeFlags):
+                        flag_ok_r.append(r)
+            else:
+                flag_ok_r = all_reg
+
+            # check system required flags for allocation
+            for r in flag_ok_r:
+                # check the mem region is coarse grained if dGPU present
+                # TODO: this probably ought to explicitly check for a dGPU.
+                if (hw == "GPU" and not\
+                    r.supports(enums.HSA_REGION_GLOBAL_FLAG_COARSE_GRAINED)):
+                    continue
+                # check accessibility criteria
+                if hostAccessible == True:
+                    if r.host_accessible:
+                        regions.append(r)
+                elif hostAccessible == False:
+                    if not r.host_accessible:
+                        regions.append(r)
+                else:
+                    raise RuntimeError("hostAccessible must be\
+                    True or False, found %s" % hostAccessible)
+        else:
+            raise RuntimeError("Unknown device type string \"%s\"" % hw)
+
+        assert len(regions) > 0, "No suitable memory regions found."
+
+        # walk though valid regions trying to malloc until there's none left
+        mem = None
+        for region_id in regions:
+            try:
+                mem = MemRegion.instance_for(self._agent, region_id)\
+                        .allocate(nbytes)
+            except HsaApiError: # try next memory region if an allocation fails
+                pass
+            else: # allocation succeeded, stop looking for memory
+                break
+
+        if mem == None:
+            raise RuntimeError("Memory allocation failed. No agent/region \
+              combination could meet allocation restraints \
+              (hardware = %s, size = %s, flags = %s)." % \
+              ( hw, nbytes, memTypeFlags))
+
+        fin = _make_mem_finalizer(hsa.hsa_memory_free)
+        ret = MemoryPointer(weakref.proxy(self), mem,  nbytes,\
+                finalizer = fin(self, mem))
+        if mem.value == None:
+            raise RuntimeError("MemoryPointer has no value")
+        self.allocations[mem.value] = ret
+        return ret.own()
+
+def _make_mem_finalizer(dtor):
+    """
+    finalises memory
+    Parameters:
+    dtor a function that will delete/free held memory from a reference
+
+    Returns:
+    Finalising function
+    """
+    def mem_finalize(context, handle):
+        allocations = context.allocations
+
+        def core():
+            def cleanup():
+                if allocations:
+                    del allocations[handle.value]
+                dtor(handle)
+        return core
+
+    return mem_finalize
+
+def device_pointer(obj):
+    "Get the device pointer as an integer"
+    return device_ctypes_pointer(obj).value
+
+
+def device_ctypes_pointer(obj):
+    "Get the ctypes object for the device pointer"
+    if obj is None:
+        return c_void_p(0)
+    require_device_memory(obj)
+    return obj.device_ctypes_pointer
+
+
+def is_device_memory(obj):
+    """All HSA dGPU memory object is recognized as an instance with the
+    attribute "__hsa_memory__" defined and its value evaluated to True.
+
+    All HSA memory object should also define an attribute named
+    "device_pointer" which value is an int(or long) object carrying the pointer
+    value of the device memory address.  This is not tested in this method.
+    """
+    return getattr(obj, '__hsa_memory__', False)
+
+
+def require_device_memory(obj):
+    """A sentry for methods that accept HSA memory object.
+    """
+    if not is_device_memory(obj):
+        raise Exception("Not a HSA memory object.")
+
+
+def host_pointer(obj):
+    """
+    NOTE: The underlying data pointer from the host data buffer is used and
+    it should not be changed until the operation which can be asynchronous
+    completes.
+    """
+    if isinstance(obj, (int, long)):
+        return obj
+
+    forcewritable = isinstance(obj, np.void)
+    return mviewbuf.memoryview_get_buffer(obj, forcewritable)
+
+def host_to_dGPU(context, dst, src, size):
+    """
+    Copy data from a host memory region to a dGPU.
+    Parameters:
+    context the dGPU context
+    dst a pointer to the destination location in dGPU memory
+    src a pointer to the source location in host memory
+    size the size (in bytes) of data to transfer
+    """
+    if size < 0:
+        raise ValueError("Invalid size given: %s" % size)
+
+    # dst and src are 2 pointers to memory
+    # Allocate a host accessible buffer for the transfer
+    buf = context.memalloc(size, memTypeFlags=\
+            [enums.HSA_REGION_GLOBAL_FLAG_COARSE_GRAINED], hostAccessible=True)
+    # Copy src->buf
+    hsa.hsa_memory_copy(device_pointer(buf), src.ctypes.data, size)
+    # Copy buf->dst
+    hsa.hsa_memory_copy(dst.device_ctypes_pointer.value, device_pointer(buf), size)
+
+def dGPU_to_host(context, dst, src, size):
+    """
+    Copy data from a host memory region to a dGPU.
+    Parameters:
+    context the dGPU context
+    dst a pointer to the destination location in dGPU memory
+    src a pointer to the source location in host memory
+    size the size (in bytes) of data to transfer
+    """
+    if size < 0:
+        raise ValueError("Invalid size given: %s" % size)
+
+    # dst and src are 2 pointers to memory
+    # Allocate a host accessible buffer for the transfer
+    buf = context.memalloc(size, memTypeFlags=\
+            [enums.HSA_REGION_GLOBAL_FLAG_COARSE_GRAINED], hostAccessible=True)
+    # Copy src->buf
+    hsa.hsa_memory_copy(device_pointer(buf), src.device_ctypes_pointer.value, size)
+    # Copy buf->dst
+    hsa.hsa_memory_copy(host_pointer(dst), device_pointer(buf), size)
+

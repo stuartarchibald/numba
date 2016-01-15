@@ -7,6 +7,7 @@ import numba.unittest_support as unittest
 
 
 class TestSimple(unittest.TestCase):
+
     def test_array_access(self):
         magic_token = 123
 
