@@ -9,6 +9,7 @@ Expose all functions as pointers in a dedicated C extension.
 #include "_pymodule.h"
 #include <math.h>
 #include "_helperlib.c"
+#include "_lapack.c"
 
 static PyObject *
 build_c_helpers_dict(void)
