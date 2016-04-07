@@ -85,6 +85,9 @@ build_c_helpers_dict(void)
     declmethod(xxgetrf);
     declmethod(xxgetri);
     declmethod(xxpotrf);
+    declmethod(ez_geev);
+    declmethod(ez_rgeev);
+    declmethod(ez_cgeev);
 
     declpointer(py_random_state);
     declpointer(np_random_state);

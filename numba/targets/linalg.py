@@ -675,9 +675,9 @@ def inv(context, builder, sig, args):
         return mat_inv(context, builder, sig, args)
     else:
         assert 0
-
-
+        
 if numpy_version >= (1, 8):
+
 
     @overload(numpy.linalg.cholesky)
     def cho_impl(a):
@@ -725,3 +725,127 @@ if numpy_version >= (1, 8):
             return out
 
         return cho_impl
+
+    @overload(numpy.linalg.eig)
+    def eig_impl(a):
+        ensure_lapack()
+
+        if not isinstance(a, types.Array) or a.ndim != 2:
+            raise TypeError("eig() argument should be a 2-dimension array, "     
+                       "got %s" % (a,))
+                                             
+        numba_ez_rgeev_sig = types.intc(
+                                            [types.char,    #kind
+                                             types.char,    #jobvl
+                                             types.char,    #jobvr
+                                             types.intp,    #n
+                                             types.voidptr, #a
+                                             types.intp,    #lda
+                                             types.voidptr, #wr
+                                             types.voidptr, #wi
+                                             types.voidptr, #vl
+                                             types.intp,    #ldvl
+                                             types.voidptr, #vr
+                                             types.voidptr  #ldvr
+                                             ])                                  
+           
+                            
+        numba_ez_rgeev = types.ExternalFunction(numba_ez_rgeev_sig,
+                                      name="numba_ez_rgeev")
+
+        numba_ez_cgeev_sig = types.intc(
+                                            [types.char,    #kind
+                                             types.char,    #jobvl
+                                             types.char,    #jobvr
+                                             types.intp,    #n
+                                             types.voidptr, #a
+                                             types.intp,    #lda
+                                             types.voidptr, #w
+                                             types.voidptr, #vl
+                                             types.intp,    #ldvl
+                                             types.voidptr, #vr
+                                             types.voidptr  #ldvr
+                                             ])                                 
+ 
+           
+                            
+        numba_ez_cgeev = types.ExternalFunction(numba_ez_cgeev_sig,
+                                      name="numba_ez_cgeev")
+
+        kind = get_blas_kind(a_type.dtype)
+
+        JOBVL = ord('N')
+        JOBVR = ord('V')
+
+        # XXX use ndarray.ctypes instead?
+        import cffi
+        ffi = cffi.FFI()
+
+        def real_eig_impl(a):
+            n = a.shape[-1]
+            if a.shape[-2] != n:
+                raise numpy.linalg.LinAlgError("Last 2 dimensions of the
+                                                array must be square")
+
+            acpy = a.copy()
+            ldvl = 1
+            ldvr = n
+            wr = numpy.zeros(n, dtype=a.dtype)
+            wi = numpy.zeros(n, dtype=a.dtype)
+            vl = numpy.zeros(ldvl*n, dtype=a.dtype)
+            vr = numpy.zeros(ldvr*n, dtype=a.dtype)
+            
+            # XXX spurious heap allocation
+            info = numpy.zeros(1, dtype=numpy.intc)
+            r = numba_ez_rgeev(kind,
+                            JOBVL,
+                            JOBVR,
+                            n
+                            ffi.from_buffer(acpy),
+                            n, 
+                            ffi.from_buffer(wr),
+                            ffi.from_buffer(wi),
+                            ffi.from_buffer(vl),
+                            ldvl,
+                            ffi.from_buffer(vr),
+                            ldvr)
+            if numpy.any(wi):
+                raise TypeError("eig() argument must not 
+                                    cause a domain change") 
+            
+            return (wr, vr)
+
+        def cmplx_eig_impl(a):
+            n = a.shape[-1]
+            if a.shape[-2] != n:
+                raise numpy.linalg.LinAlgError("Last 2 dimensions of the
+                                                array must be square")
+
+            acpy = a.copy()
+            ldvl = 1
+            ldvr = n
+            w = numpy.zeros(n, dtype=a.dtype)
+            vl = numpy.zeros(ldvl*n, dtype=a.dtype)
+            vr = numpy.zeros(ldvr*n, dtype=a.dtype)
+            
+            # XXX spurious heap allocation
+            info = numpy.zeros(1, dtype=numpy.intc)
+            r = numba_ez_rgeev(kind,
+                            JOBVL,
+                            JOBVR,
+                            n
+                            ffi.from_buffer(acpy),
+                            n, 
+                            ffi.from_buffer(w),
+                            ffi.from_buffer(vl),
+                            ldvl,
+                            ffi.from_buffer(vr),
+                            ldvr)
+            
+            return (w, vr)
+
+        if numpy.iscomplexobj(a)
+            return cmplx_eig_impl(a)            
+        else:
+            return real_eig_impl(a)
+

@@ -447,9 +447,10 @@ F_INT cast_from_X(char kind, void *val)
 }
 
 // real space eigen systems info from dgeev/sgeev
-NUMBA_EXPORT_FUNC(F_INT)numba_raw_rgeev(char kind, char jobvl, char jobvr, 
+NUMBA_EXPORT_FUNC(F_INT)
+numba_raw_rgeev(char kind, char jobvl, char jobvr, 
 F_INT n, void *a, F_INT lda, void *wr, void *wi, void *vl, 
-F_INT ldvl, void *vr, F_INT ldvr, void *work, F_INT lwork, F_INT info)
+F_INT ldvl, void *vr, F_INT ldvr, void *work, F_INT lwork, F_INT * info)
 {
     void *raw_func = NULL;
 
@@ -473,16 +474,18 @@ F_INT ldvl, void *vr, F_INT ldvr, void *work, F_INT lwork, F_INT info)
         return -1;
 
     (*(rgeev_t) raw_func)(&jobvl, &jobvr, &n, a, &lda, wr, wi, vl, &ldvl, vr,
-        &ldvr, work, &lwork, &info);
+        &ldvr, work, &lwork, info);
     return 0;
 }
 
 // real space eigen systems info from dgeev/sgeev
 // as numba_raw_rgeev but the allocation and error handling is done for the user
-NUMBA_EXPORT_FUNC(F_INT)numba_ez_rgeev(char kind, char jobvl, char jobvr, 
+NUMBA_EXPORT_FUNC(F_INT)
+numba_ez_rgeev(char kind, char jobvl, char jobvr, 
 F_INT n, void *a, F_INT lda, void *wr, void *wi, void *vl, 
-F_INT ldvl, void *vr, F_INT ldvr, F_INT info)
+F_INT ldvl, void *vr, F_INT ldvr)
 {
+    F_INT info = 0;
     size_t base_size = -1;
     // find the function to call, decide on a base type size
     switch (kind) {
@@ -504,7 +507,7 @@ F_INT ldvl, void *vr, F_INT ldvr, F_INT info)
     F_INT lwork = -1;
     void * work = malloc(base_size);
     numba_raw_rgeev(kind, jobvl, jobvr, n, a, lda, wr, wi, vl, ldvl, 
-                vr, ldvr, work, lwork, info);
+                vr, ldvr, work, lwork, &info);
     lwork = cast_from_X(kind, work);
     free(work);
     if(info < 0) {
@@ -518,7 +521,7 @@ F_INT ldvl, void *vr, F_INT ldvr, F_INT info)
     }
     work = malloc(base_size * lwork);
     numba_raw_rgeev(kind, jobvl, jobvr, n, a, lda, wr, wi, vl, ldvl, 
-                vr, ldvr, work, lwork, info);
+                vr, ldvr, work, lwork, &info);
     free(work);
     if(info) {
         {
@@ -530,19 +533,21 @@ F_INT ldvl, void *vr, F_INT ldvr, F_INT info)
             {
             PyErr_Format(PyExc_ValueError,\
                 "LAPACK Error: QR failed to compute all eigenvalues, no\
-                eigenvectors have been computed. i+1:n of wr/wi contain\
+                eigenvectors have been computed. i+1:n of wr/wi contains\
                 converged eigenvalues. i = %d (Fortran indexing)\n", info);
             }
             PyGILState_Release(st);
         }
         return -1;
     }
+    return 0;
 }
 
 // complex space eigen systems info from cgeev/zgeev
-NUMBA_EXPORT_FUNC(F_INT)numba_raw_cgeev(char kind, char jobvl, char jobvr,
+NUMBA_EXPORT_FUNC(F_INT)
+numba_raw_cgeev(char kind, char jobvl, char jobvr,
 F_INT n, void *a, F_INT lda, void *w, void *vl, F_INT ldvl, void
-*vr, F_INT ldvr, void *work, F_INT lwork, double *rwork, F_INT info)
+*vr, F_INT ldvr, void *work, F_INT lwork, double *rwork, F_INT * info)
 {
     void *raw_func = NULL;
 
@@ -566,9 +571,80 @@ F_INT n, void *a, F_INT lda, void *w, void *vl, F_INT ldvl, void
         return -1;
 
     (*(cgeev_t) raw_func)(&jobvl, &jobvr, &n, a, &lda, w, vl, &ldvl, vr, &ldvr,
-        work, &lwork, rwork, &info);
+        work, &lwork, rwork, info);
     return 0;
 }
+
+
+// complex space eigen systems info from cgeev/zgeev
+// as numba_raw_cgeev but the allocation and error handling is done for the user
+NUMBA_EXPORT_FUNC(F_INT)
+numba_ez_cgeev(char kind, char jobvl, char jobvr, 
+F_INT n, void *a, F_INT lda, void *w, void *vl, F_INT ldvl, void *vr, F_INT 
+ldvr)
+{
+    F_INT info = 0;
+    size_t base_size = -1;
+    // find the function to call, decide on a base type size
+    switch (kind) {
+        case 'c':
+            base_size = sizeof(npy_complex64);
+            break;
+        case 'z':
+            base_size = sizeof(npy_complex128);
+            break;
+        default:
+            {
+                PyGILState_STATE st = PyGILState_Ensure();
+                PyErr_SetString(PyExc_ValueError,\
+                  "Invalid kind in numba_ez_cgeev");
+                PyGILState_Release(st);
+            }
+            return -1;
+    }
+    F_INT lwork = -1;
+    void * work = malloc(base_size);
+    double * rwork = malloc(2*n*base_size);
+    numba_raw_cgeev(kind, jobvl, jobvr, n, a, lda, w, vl, ldvl, 
+                vr, ldvr, work, lwork, rwork, &info);
+    lwork = cast_from_X(kind, work);
+    free(work);
+    if(info < 0) {
+        free(rwork);
+        {
+            PyGILState_STATE st = PyGILState_Ensure();
+            PyErr_Format(PyExc_ValueError,\
+                "LAPACK Error: on input %d\n", -info);
+            PyGILState_Release(st);
+        }
+        return -1;
+    }
+    work = malloc(base_size * lwork);
+    numba_raw_cgeev(kind, jobvl, jobvr, n, a, lda, w, vl, ldvl, 
+                vr, ldvr, work, lwork, rwork, &info);
+    free(work);
+    free(rwork);
+
+    if(info) {
+        {
+            PyGILState_STATE st = PyGILState_Ensure();
+            if(info < 0) {
+                PyErr_Format(PyExc_ValueError,\
+                "LAPACK Error: on input %d\n", -info);
+            } else 
+            {
+            PyErr_Format(PyExc_ValueError,\
+                "LAPACK Error: QR failed to compute all eigenvalues, no\
+                eigenvectors have been computed. i+1:n of w contains\
+                converged eigenvalues. i = %d (Fortran indexing)\n", info);
+            }
+            PyGILState_Release(st);
+        }
+        return -1;
+    }
+    return 0;
+}
+
 
 
 // Eigen systems info from *geev.
@@ -577,22 +653,30 @@ F_INT n, void *a, F_INT lda, void *w, void *vl, F_INT ldvl, void
 // in that the real space routines return real and complex eigenvalues in
 // separate real variables, this is hidden below by packing them into a complex
 // variable. The work space computation and error handling etc is also hidden.
-NUMBA_EXPORT_FUNC(F_INT)numba_ez_geev(char kind, char jobvl, char jobvr,
+NUMBA_EXPORT_FUNC(F_INT)
+numba_ez_geev(char kind, char jobvl, char jobvr,
 F_INT n, void *a, F_INT lda, void *w, void *vl, F_INT ldvl, void
-*vr, F_INT ldvr, F_INT info)
+*vr, F_INT ldvr)
 {
     // real space, will need packing into `w` for return
-    void * wr, * wi;
-
+    void * wr = NULL, * wi = NULL;
+    size_t base_size;
     switch (kind) {
         case 's':
+            base_size = sizeof(float);
         case 'd':
+            base_size = sizeof(double);
+            
+            wi = malloc(n*base_size);
+            wr = malloc(n*base_size);
+
             numba_ez_rgeev(kind, jobvl, jobvr, n, a, lda, wr, wi, vl, ldvl, 
-                        vr, ldvr, info);
+                        vr, ldvr);
             break;
         case 'c':
         case 'z':
-            
+            numba_ez_cgeev(kind, jobvl, jobvr, n, a, lda, w, vl, ldvl, 
+                        vr, ldvr);
             break;
         default:
             {
