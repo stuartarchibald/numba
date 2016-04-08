@@ -9,7 +9,9 @@ import contextlib
 from llvmlite import ir
 import numpy
 
+
 from numba import jit, types, cgutils
+
 from numba.targets.imputils import (lower_builtin, impl_ret_borrowed,
                                     impl_ret_new_ref, impl_ret_untracked)
 from numba.typing import signature
@@ -784,8 +786,8 @@ if numpy_version >= (1, 8):
         def real_eig_impl(a):
             n = a.shape[-1]
             if a.shape[-2] != n:
-                raise numpy.linalg.LinAlgError("Last 2 dimensions of the
-                                                array must be square")
+                msg = "Last 2 dimensions of the array must be square."
+                raise numpy.linalg.LinAlgError(msg)
 
             acpy = a.copy()
             ldvl = 1
@@ -800,7 +802,7 @@ if numpy_version >= (1, 8):
             r = numba_ez_rgeev(kind,
                             JOBVL,
                             JOBVR,
-                            n
+                            n,
                             ffi.from_buffer(acpy),
                             n, 
                             ffi.from_buffer(wr),
@@ -810,16 +812,16 @@ if numpy_version >= (1, 8):
                             ffi.from_buffer(vr),
                             ldvr)
             if numpy.any(wi):
-                raise TypeError("eig() argument must not 
-                                    cause a domain change") 
+                msg = "eig() argument must not cause a domain change"
+                raise TypeError(msg) 
             
             return (wr, vr)
 
         def cmplx_eig_impl(a):
             n = a.shape[-1]
             if a.shape[-2] != n:
-                raise numpy.linalg.LinAlgError("Last 2 dimensions of the
-                                                array must be square")
+                msg = "Last 2 dimensions of the array must be square."
+                raise numpy.linalg.LinAlgError(msg)
 
             acpy = a.copy()
             ldvl = 1
@@ -833,7 +835,7 @@ if numpy_version >= (1, 8):
             r = numba_ez_rgeev(kind,
                             JOBVL,
                             JOBVR,
-                            n
+                            n,
                             ffi.from_buffer(acpy),
                             n, 
                             ffi.from_buffer(w),
@@ -844,7 +846,7 @@ if numpy_version >= (1, 8):
             
             return (w, vr)
 
-        if numpy.iscomplexobj(a)
+        if numpy.iscomplexobj(a):
             return cmplx_eig_impl(a)            
         else:
             return real_eig_impl(a)
