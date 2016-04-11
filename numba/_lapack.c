@@ -392,8 +392,7 @@ numba_xxpotrf(char kind, char uplo, Py_ssize_t n, void *a, Py_ssize_t lda, int
             {
                 PyGILState_STATE st = PyGILState_Ensure();
                 PyErr_SetString(PyExc_ValueError,
-                                "invalid kind of Cholesky factorization 
-function");
+                            "invalid kind of Cholesky factorization function");
                 PyGILState_Release(st);
             }
             return -1;
@@ -504,6 +503,27 @@ F_INT ldvl, void *vr, F_INT ldvr)
             }
             return -1;
     }
+    
+    int k;
+    double * f = (double *) wr;
+    printf("wr\n");
+    for(k = 0; k < n; k++)
+    {
+        printf("%f\n",f[k]);
+    }
+    printf("wi\n");
+    f = (double *) wi;
+    for(k = 0; k < n; k++)
+    {
+        printf("%f\n",f[k]);
+    }
+    printf("a\n");
+    f = (double *) a;
+    for(k = 0; k < n*n; k++)
+    {
+        printf("%f\n",f[k]);
+    }    
+    
     F_INT lwork = -1;
     void * work = malloc(base_size);
     numba_raw_rgeev(kind, jobvl, jobvr, n, a, lda, wr, wi, vl, ldvl, 
@@ -523,6 +543,12 @@ F_INT ldvl, void *vr, F_INT ldvr)
     numba_raw_rgeev(kind, jobvl, jobvr, n, a, lda, wr, wi, vl, ldvl, 
                 vr, ldvr, work, lwork, &info);
     free(work);
+
+    for(k = 0; k < n; k++)
+    {
+        printf("%f\n",f[k]);
+    }
+    
     if(info) {
         {
             PyGILState_STATE st = PyGILState_Ensure();

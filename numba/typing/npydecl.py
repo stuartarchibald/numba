@@ -843,15 +843,15 @@ if numpy_version >= (1, 8):
 
             return typer
 
-    @infer_global(numpy.linalg.eig)
-    class LinalgEig(CallableTemplate):
-        def generic(self):
-            def typer(a):
-                _check_linalg_matrix(a, "eig")
-                return types.Tuple((a.copy(ndim=1, layout='C'),
-                                    a.copy(layout='C')))
+    #@infer_global(numpy.linalg.eig)
+    #class LinalgEig(CallableTemplate):
+        #def generic(self):
+            #def typer(a):
+                #_check_linalg_matrix(a, "eig")
+                #return types.Tuple((a.copy(ndim=1, layout='C'),
+                                    #a.copy(layout='C')))
 
-            return typer
+            #return typer
 
 
 @infer_global(numpy.linalg.qr)
