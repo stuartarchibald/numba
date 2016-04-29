@@ -414,6 +414,11 @@ EMIT_GET_CLAPACK_FUNC(dorgqr)
 EMIT_GET_CLAPACK_FUNC(cungqr)
 EMIT_GET_CLAPACK_FUNC(zungqr)
 
+// Computes the minimum norm solution to linear least squares problems
+EMIT_GET_CLAPACK_FUNC(sgelsd)
+EMIT_GET_CLAPACK_FUNC(dgelsd)
+EMIT_GET_CLAPACK_FUNC(cgelsd)
+EMIT_GET_CLAPACK_FUNC(zgelsd)
 
 
 #undef EMIT_GET_CLAPACK_FUNC
@@ -451,6 +456,14 @@ typedef void (*xgeqrf_t)(F_INT *m, F_INT *n, void *a, F_INT *lda, void *tau,
 typedef void (*xxxgqr_t)(F_INT *m, F_INT *n, F_INT *k, void *a, F_INT *lda,
                          void *tau, void *work, F_INT *lwork, F_INT *info);
 
+typedef void (*rgelsd_t)(F_INT *m, F_INT *n, F_INT *nrhs, void *a, F_INT *lda,
+                         void *b, F_INT *ldb, void *s, void *rcond, F_INT *rank,
+                         void *work, F_INT *lwork, F_INT *iwork, F_INT *info);
+
+typedef void (*cgelsd_t)(F_INT *m, F_INT *n, F_INT *nrhs, void *a, F_INT *lda,
+                         void *b, F_INT *ldb, void *s, void *rcond, F_INT *rank,
+                         void *work, F_INT *lwork, void *rwork, F_INT *iwork,
+                         F_INT *info);
 
 
 #define CATCH_LAPACK_INVALID_ARG(__routine, info)                      \
@@ -1261,3 +1274,53 @@ numba_ez_xxgqr(char kind, Py_ssize_t m, Py_ssize_t n, Py_ssize_t k, void *a,
     return 0; // info cannot be >0
 
 }
+
+
+/*
+ * Compute the minimum-norm solution to a real linear least squares problem.
+ * Return -1 on internal error, 0 on success, > 0 on failure.
+ */
+static int
+numba_raw_rgelsd(char kind, Py_ssize_t m, Py_ssize_t n, Py_ssize_t nrhs,
+                 void *a, Py_ssize_t lda, void *b, Py_ssize_t ldb, void *S, 
+                 void * rcond, Py_ssize_t * rank, void * work, 
+                 Py_ssize_t lwork, F_INT *iwork, Py_ssize_t *info)
+{
+    void *raw_func = NULL;
+    F_INT _m, _n, _nrhs, _lda, _ldb, _rank, _lwork, _info;
+
+    switch (kind)
+    {
+        case 's':
+            raw_func = get_clapack_sgelsd();
+            break;
+        case 'd':
+            raw_func = get_clapack_dgelsd();
+            break;
+        default:
+        {
+            PyGILState_STATE st = PyGILState_Ensure();
+            PyErr_SetString(PyExc_ValueError,
+                            "invalid kind of minimum-norm function");
+            PyGILState_Release(st);
+        }
+        return -1;
+    }
+    if (raw_func == NULL)
+        return -1;
+
+    _m = (F_INT) m;
+    _n = (F_INT) n;
+    _nrhs = (F_INT) nrhs;
+    _lda = (F_INT) lda;
+    _ldb = (F_INT) ldb;
+    _lwork = (F_INT) lwork;
+
+    (*(rgelsd_t) raw_func)(&_m, &_n, &_nrhs, a, &_lda, b, &_ldb, S, rcond, 
+                           &_rank, work, &_lwork, iwork, &_info);
+    *info = (Py_ssize_t) _info;
+    *rank = (Py_ssize_t) _rank;
+    return 0;
+}
+
+
