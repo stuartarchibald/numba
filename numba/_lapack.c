@@ -1289,6 +1289,8 @@ numba_raw_rgelsd(char kind, Py_ssize_t m, Py_ssize_t n, Py_ssize_t nrhs,
     void *raw_func = NULL;
     F_INT _m, _n, _nrhs, _lda, _ldb, _rank, _lwork, _info;
 
+    ENSURE_VALID_REAL_KIND(kind)
+    
     switch (kind)
     {
         case 's':
@@ -1297,14 +1299,6 @@ numba_raw_rgelsd(char kind, Py_ssize_t m, Py_ssize_t n, Py_ssize_t nrhs,
         case 'd':
             raw_func = get_clapack_dgelsd();
             break;
-        default:
-        {
-            PyGILState_STATE st = PyGILState_Ensure();
-            PyErr_SetString(PyExc_ValueError,
-                            "invalid kind of minimum-norm function");
-            PyGILState_Release(st);
-        }
-        return -1;
     }
     if (raw_func == NULL)
         return -1;
@@ -1323,4 +1317,205 @@ numba_raw_rgelsd(char kind, Py_ssize_t m, Py_ssize_t n, Py_ssize_t nrhs,
     return 0;
 }
 
+/*
+ * Compute the minimum-norm solution to a real linear least squares problem.
+ * This routine hides the type and general complexity involved with making the
+ * {s,d}gelsd calls. The work space computation and error handling etc is
+ * hidden. Args are as per LAPACK.
+ */
+static int
+numba_ez_rgelsd(char kind, Py_ssize_t m, Py_ssize_t n, Py_ssize_t nrhs,
+                 void *a, Py_ssize_t lda, void *b, Py_ssize_t ldb, void *S, 
+                 void * rcond, Py_ssize_t * rank)
+{
+    Py_ssize_t info = 0;
+    Py_ssize_t lwork = -1;
+    size_t base_size = -1;
+    all_dtypes stack_slot;
+    void *work = NULL;
+    F_INT *iwork = NULL;
+    F_INT iwork_tmp;
 
+    ENSURE_VALID_REAL_KIND(kind)
+    
+    base_size = kind_size(kind);
+
+    work = &stack_slot;
+
+    /* Compute optimal work size (lwork) */
+    numba_raw_rgelsd(kind, m, n, nrhs, a, lda, b, ldb, S, rcond, rank, work,   
+                      lwork, &iwork_tmp, &info);
+    CATCH_LAPACK_INVALID_ARG("numba_raw_rgelsd", info);
+
+    /* Allocate work array */
+    lwork = cast_from_X(kind, work);
+    if (checked_PyMem_RawMalloc(&work, base_size * lwork))
+        return -1;
+
+    printf("lwork = %d", (int)lwork);
+    
+    /* Allocate iwork array */
+    if (checked_PyMem_RawMalloc((void **)&iwork, sizeof(F_INT) * iwork_tmp))
+    {
+        PyMem_RawFree(work);
+        return -1;
+    }
+    
+    numba_raw_rgelsd(kind, m, n, nrhs, a, lda, b, ldb, S, rcond, rank, work,
+                     lwork, iwork, &info);
+    PyMem_RawFree(work);
+    PyMem_RawFree(iwork);
+    CATCH_LAPACK_INVALID_ARG("numba_raw_rgelsd", info);
+
+    return 0; // info cannot be >0
+}
+
+
+/*
+ * Compute the minimum-norm solution to a real linear least squares problem.
+ * Return -1 on internal error, 0 on success, > 0 on failure.
+ */
+static int
+numba_raw_cgelsd(char kind, Py_ssize_t m, Py_ssize_t n, Py_ssize_t nrhs,
+                 void *a, Py_ssize_t lda, void *b, Py_ssize_t ldb, void *S, 
+                 void * rcond, Py_ssize_t * rank, void * work, 
+                 Py_ssize_t lwork, void * rwork, F_INT *iwork, Py_ssize_t *info)
+{
+    void *raw_func = NULL;
+    F_INT _m, _n, _nrhs, _lda, _ldb, _rank, _lwork, _info;
+
+    ENSURE_VALID_COMPLEX_KIND(kind)
+    
+    switch (kind)
+    {
+        case 'c':
+            raw_func = get_clapack_cgelsd();
+            break;
+        case 'z':
+            raw_func = get_clapack_zgelsd();
+            break;
+    }
+    if (raw_func == NULL)
+        return -1;
+
+    _m = (F_INT) m;
+    _n = (F_INT) n;
+    _nrhs = (F_INT) nrhs;
+    _lda = (F_INT) lda;
+    _ldb = (F_INT) ldb;
+    _lwork = (F_INT) lwork;
+
+    (*(cgelsd_t) raw_func)(&_m, &_n, &_nrhs, a, &_lda, b, &_ldb, S, rcond, 
+                           &_rank, work, &_lwork, rwork, iwork, &_info);
+    *info = (Py_ssize_t) _info;
+    *rank = (Py_ssize_t) _rank;
+    return 0;
+}
+
+
+/*
+ * Compute the minimum-norm solution to a complex linear least squares problem.
+ * This routine hides the type and general complexity involved with making the
+ * {c,z}gelsd calls. The work space computation and error handling etc is
+ * hidden. Args are as per LAPACK.
+ */
+static int
+numba_ez_cgelsd(char kind, Py_ssize_t m, Py_ssize_t n, Py_ssize_t nrhs,
+                 void *a, Py_ssize_t lda, void *b, Py_ssize_t ldb, void *S, 
+                 void * rcond, Py_ssize_t * rank)
+{
+    Py_ssize_t info = 0;
+    Py_ssize_t lwork = -1;
+    size_t base_size = -1;
+    all_dtypes stack_slot1, stack_slot2;
+    size_t real_base_size = 0;
+    void *work = NULL, *rwork = NULL;
+    Py_ssize_t liwork, lrwork;
+    F_INT *iwork = NULL;
+    char real_kind = '-';
+
+    ENSURE_VALID_COMPLEX_KIND(kind)
+    
+    base_size = kind_size(kind);
+
+    work = &stack_slot1;
+    rwork = &stack_slot2;
+
+    /* Compute optimal work size */
+    numba_raw_cgelsd(kind, m, n, nrhs, a, lda, b, ldb, S, rcond, rank, work,   
+                      lwork, rwork, iwork, &info);
+    CATCH_LAPACK_INVALID_ARG("numba_raw_cgelsd", info);
+
+    /* Allocate work array */
+    lwork = cast_from_X(kind, work);
+    if (checked_PyMem_RawMalloc(&work, base_size * lwork))
+        return -1;
+
+    /* Allocate iwork array */
+    liwork = *iwork;
+    if (checked_PyMem_RawMalloc((void **)&iwork, sizeof(F_INT) * liwork))
+    {
+        PyMem_RawFree(work);
+        return -1;
+    }
+
+    // Perhaps this sort of fake type traits thing ought to be 
+    // pulled out for reuse?
+    switch (kind)
+    {
+        case 'c':
+            real_kind = 's';
+            break;
+        case 'z':
+            real_kind = 'd';
+            break;        
+    }
+
+    real_base_size = kind_size(real_kind);
+    
+    lrwork = cast_from_X(real_kind, rwork);
+    if (checked_PyMem_RawMalloc((void **)&rwork, real_base_size * lrwork))
+    {
+        PyMem_RawFree(work);
+        PyMem_RawFree(iwork);
+        return -1;
+    }
+    
+    numba_raw_cgelsd(kind, m, n, nrhs, a, lda, b, ldb, S, rcond, rank, work,
+                     lwork, rwork, iwork, &info);
+    PyMem_RawFree(work);
+    PyMem_RawFree(rwork);
+    PyMem_RawFree(iwork);
+    CATCH_LAPACK_INVALID_ARG("numba_raw_cgelsd", info);
+
+    return 0; // info cannot be >0
+}
+
+
+/*
+ * Compute the minimum-norm solution to a linear least squares problems.
+ * This routine hides the type and general complexity involved with making the
+ * calls to *gelsd. The work space computation and error handling etc is hidden.
+ * Args are as per LAPACK.
+ */
+NUMBA_EXPORT_FUNC(int)
+numba_ez_gelsd(char kind, Py_ssize_t m, Py_ssize_t n, Py_ssize_t nrhs,
+               void *a, Py_ssize_t lda, void *b, Py_ssize_t ldb, void *S, 
+               void * rcond, Py_ssize_t * rank)
+{
+    ENSURE_VALID_KIND(kind)
+
+    switch (kind)
+    {
+        case 's':
+        case 'd':
+            printf("call to numba_ez_rgelsd\n");
+            return numba_ez_rgelsd(kind, m, n, nrhs, a, lda, b, ldb, S, rcond, 
+                                    rank);
+        case 'c':
+        case 'z':
+            return numba_ez_cgelsd(kind, m, n, nrhs, a, lda, b, ldb, S, rcond, 
+                                    rank);
+    }
+    return -1; // unreachable
+}

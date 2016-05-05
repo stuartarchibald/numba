@@ -1110,3 +1110,117 @@ def qr_impl(a):
         return (q[:, :minmn], r)
 
     return qr_impl
+
+@overload(numpy.linalg.lstsq)
+def lstsq_impl(a, b, rcond=-1):
+    ensure_lapack()
+
+    _check_linalg_matrix(a, "lstsq")
+    _check_linalg_matrix(b, "lstsq")
+
+    a_F_layout = a.layout == 'F'
+    b_F_layout = b.layout == 'F'
+
+    type_table = {
+        types.float32: numpy.float32,
+        types.float64: numpy.float64,
+        types.complex64: numpy.complex64,
+        types.complex128: numpy.complex128
+    }
+
+    inv_type_table = {
+        numpy.dtype('float32'): types.float32,
+        numpy.dtype('float64'): types.float64,
+        numpy.dtype('complex64'): types.complex64,
+        numpy.dtype('complex128'): types.complex128
+    }
+
+    np_shared_dt = numpy.promote_types(type_table[a.dtype], type_table[b.dtype])
+    nb_shared_dt = inv_type_table[np_shared_dt]
+        
+    # convert typing floats to numpy floats for use in the impl
+    r_type = getattr(nb_shared_dt, "underlying_float", nb_shared_dt)
+    if r_type.bitwidth == 32:
+        real_dtype = numpy.float32
+    else:
+        real_dtype = numpy.float64
+
+    numba_ez_gelsd_sig = types.intc(
+                            types.char, # kind
+                            types.intp, # m
+                            types.intp, # n
+                            types.intp, # nrhs
+                            types.CPointer(nb_shared_dt), #a
+                            types.intp, # lda
+                            types.CPointer(nb_shared_dt), #b
+                            types.intp, # ldb
+                            types.CPointer(nb_shared_dt), #S
+                            types.CPointer(nb_shared_dt), #rcond
+                            types.CPointer(types.intc) #rank
+                            )
+
+    numba_ez_gelsd = types.ExternalFunction("numba_ez_gelsd",
+                                            numba_ez_gelsd_sig)
+
+    kind = ord(get_blas_kind(nb_shared_dt, "lstsq"))
+
+    def lstsq_impl(a, b, rcond=-1):
+        n = a.shape[-1]
+        m = a.shape[-2]
+        nrhs = b.shape[-1]
+
+        _check_finite_matrix(a)
+        _check_finite_matrix(b)
+        
+        # check system commutes here...
+
+        # a is destroyed on exit
+        acpy = a.astype(np_shared_dt)
+        if a_F_layout:
+            acpy = numpy.copy(a)
+        else:
+            acpy = numpy.asfortranarray(a)
+
+        # b is overwritten on exit with the solution
+        bcpy = b.astype(np_shared_dt)
+        if b_F_layout:
+            bcpy = numpy.copy(b)
+        else:
+            bcpy = numpy.asfortranarray(b)
+
+        minmn = min(m, n)
+
+        # Allocate returns
+        s = numpy.empty(minmn, dtype=real_dtype)
+        rcond = numpy.empty(1, dtype=real_dtype)
+        rank = numpy.empty(1, dtype=numpy.int32)
+
+        r = numba_ez_gelsd(
+            kind,  # kind
+            m,  # m
+            n,  # n
+            nrhs,  # nrhs
+            acpy.ctypes,  # a
+            m,  # lda
+            bcpy.ctypes,  # a
+            m,  # ldb
+            s.ctypes,  # s
+            rcond.ctypes, # rcond
+            rank.ctypes # rank
+        )
+        if r < 0:
+            fatal_error_func()
+            assert 0   # unreachable
+
+        # help liveness analysis
+        acpy.size
+        bcpy.size
+        s.size
+        rcond.size
+        rank.size
+
+        return (bcpy.T, 1, rank[0], s)
+
+    return lstsq_impl
+
+
