@@ -1154,8 +1154,8 @@ def lstsq_impl(a, b, rcond=-1):
                             types.intp, # lda
                             types.CPointer(nb_shared_dt), #b
                             types.intp, # ldb
-                            types.CPointer(nb_shared_dt), #S
-                            types.CPointer(nb_shared_dt), #rcond
+                            types.CPointer(r_type), #S
+                            types.CPointer(r_type), #rcond
                             types.CPointer(types.intc) #rank
                             )
 
@@ -1177,23 +1177,24 @@ def lstsq_impl(a, b, rcond=-1):
         # a is destroyed on exit
         acpy = a.astype(np_shared_dt)
         if a_F_layout:
-            acpy = numpy.copy(a)
+            acpy = numpy.copy(acpy)
         else:
-            acpy = numpy.asfortranarray(a)
+            acpy = numpy.asfortranarray(acpy)
 
         # b is overwritten on exit with the solution
         bcpy = b.astype(np_shared_dt)
         if b_F_layout:
-            bcpy = numpy.copy(b)
+            bcpy = numpy.copy(bcpy)
         else:
-            bcpy = numpy.asfortranarray(b)
+            bcpy = numpy.asfortranarray(bcpy)
 
         minmn = min(m, n)
+        maxmn = max(m, n)
 
         # Allocate returns
         s = numpy.empty(minmn, dtype=real_dtype)
         rcond = numpy.empty(1, dtype=real_dtype)
-        rank = numpy.empty(1, dtype=numpy.int32)
+        rank_ptr = numpy.empty(1, dtype=numpy.int32)
 
         r = numba_ez_gelsd(
             kind,  # kind
@@ -1203,23 +1204,40 @@ def lstsq_impl(a, b, rcond=-1):
             acpy.ctypes,  # a
             m,  # lda
             bcpy.ctypes,  # a
-            m,  # ldb
+            maxmn,  # ldb
             s.ctypes,  # s
             rcond.ctypes, # rcond
-            rank.ctypes # rank
+            rank_ptr.ctypes # rank
         )
+        
+       
         if r < 0:
             fatal_error_func()
             assert 0   # unreachable
+
+        rank = rank_ptr[0]
+        if rank < n or m <= n:
+            res = numpy.empty((0), dtype=real_dtype)
+        else:
+            res = numpy.empty((nrhs), dtype=real_dtype)
+            for k in range(nrhs):
+                res[k]=numpy.sum(numpy.abs(bcpy[n:, k])**2)
 
         # help liveness analysis
         acpy.size
         bcpy.size
         s.size
         rcond.size
-        rank.size
-
-        return (bcpy.T, 1, rank[0], s)
+        rank_ptr.size
+        
+        is_1d = len(b.shape) == 1
+        if is_1d:
+            x = bcpy[:n]
+        else:
+            x = numpy.zeros((maxmn, n), dtype = np_shared_dt)
+            x = bcpy
+            
+        return (x, res, rank, s[:min(m, n)])
 
     return lstsq_impl
 

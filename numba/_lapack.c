@@ -1352,8 +1352,6 @@ numba_ez_rgelsd(char kind, Py_ssize_t m, Py_ssize_t n, Py_ssize_t nrhs,
     if (checked_PyMem_RawMalloc(&work, base_size * lwork))
         return -1;
 
-    printf("lwork = %d", (int)lwork);
-    
     /* Allocate iwork array */
     if (checked_PyMem_RawMalloc((void **)&iwork, sizeof(F_INT) * iwork_tmp))
     {
@@ -1430,8 +1428,9 @@ numba_ez_cgelsd(char kind, Py_ssize_t m, Py_ssize_t n, Py_ssize_t nrhs,
     all_dtypes stack_slot1, stack_slot2;
     size_t real_base_size = 0;
     void *work = NULL, *rwork = NULL;
-    Py_ssize_t liwork, lrwork;
+    Py_ssize_t lrwork;
     F_INT *iwork = NULL;
+    F_INT iwork_tmp;
     char real_kind = '-';
 
     ENSURE_VALID_COMPLEX_KIND(kind)
@@ -1443,7 +1442,7 @@ numba_ez_cgelsd(char kind, Py_ssize_t m, Py_ssize_t n, Py_ssize_t nrhs,
 
     /* Compute optimal work size */
     numba_raw_cgelsd(kind, m, n, nrhs, a, lda, b, ldb, S, rcond, rank, work,   
-                      lwork, rwork, iwork, &info);
+                      lwork, rwork, &iwork_tmp, &info);
     CATCH_LAPACK_INVALID_ARG("numba_raw_cgelsd", info);
 
     /* Allocate work array */
@@ -1452,8 +1451,7 @@ numba_ez_cgelsd(char kind, Py_ssize_t m, Py_ssize_t n, Py_ssize_t nrhs,
         return -1;
 
     /* Allocate iwork array */
-    liwork = *iwork;
-    if (checked_PyMem_RawMalloc((void **)&iwork, sizeof(F_INT) * liwork))
+    if (checked_PyMem_RawMalloc((void **)&iwork, sizeof(F_INT) * iwork_tmp))
     {
         PyMem_RawFree(work);
         return -1;
@@ -1509,7 +1507,6 @@ numba_ez_gelsd(char kind, Py_ssize_t m, Py_ssize_t n, Py_ssize_t nrhs,
     {
         case 's':
         case 'd':
-            printf("call to numba_ez_rgelsd\n");
             return numba_ez_rgelsd(kind, m, n, nrhs, a, lda, b, ldb, S, rcond, 
                                     rank);
         case 'c':
