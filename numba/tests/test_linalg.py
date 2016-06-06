@@ -5,6 +5,7 @@ import gc
 from itertools import product
 import sys
 import warnings
+from numbers import Number
 
 import numpy as np
 
@@ -323,6 +324,8 @@ def svd_matrix(a, full_matrices=1):
 def qr_matrix(a):
     return np.linalg.qr(a)
 
+def lstsq_system(A, B, rcond=-1):
+    return np.linalg.lstsq(A, B, rcond)
 
 class TestLinalgBase(TestCase):
     """
@@ -407,25 +410,26 @@ class TestLinalgBase(TestCase):
 
         if isinstance(got, tuple):
             # tuple present, check all results
-            c_contig = {a.flags.c_contiguous for a in got} == {True}
-            f_contig = {a.flags.f_contiguous for a in got} == {True}
+            for a in got:
+                self.assert_contig_sanity(a, expected_contig)
         else:
-            # else a single array is present
-            c_contig = got.flags.c_contiguous
-            f_contig = got.flags.f_contiguous
+            if not isinstance(got, Number):
+                # else a single array is present
+                c_contig = got.flags.c_contiguous
+                f_contig = got.flags.f_contiguous
 
-        # check that the result (possible set of) is at least one of
-        # C or F contiguous.
-        msg = "Results are not at least one of all C or F contiguous."
-        self.assertTrue(c_contig | f_contig, msg)
+                # check that the result (possible set of) is at least one of
+                # C or F contiguous.
+                msg = "Results are not at least one of all C or F contiguous."
+                self.assertTrue(c_contig | f_contig, msg)
 
-        msg = "Computed contiguousness does not match expected."
-        if expected_contig == "C":
-            self.assertTrue(c_contig, msg)
-        elif expected_contig == "F":
-            self.assertTrue(f_contig, msg)
-        else:
-            raise ValueError("Unknown contig")
+                msg = "Computed contiguousness does not match expected."
+                if expected_contig == "C":
+                    self.assertTrue(c_contig, msg)
+                elif expected_contig == "F":
+                    self.assertTrue(f_contig, msg)
+                else:
+                    raise ValueError("Unknown contig")
 
 
 class TestLinalgInv(TestLinalgBase):
@@ -876,6 +880,66 @@ class TestLinalgQr(TestLinalgBase):
         self.assert_no_nan_or_inf(cfunc,
                                   (np.array([[1., 2., ], [np.inf, np.nan]],
                                             dtype=np.float64),))
+
+class TestLinalgLstsq(TestLinalgBase):
+    """
+    Tests for np.linalg.lstsq.
+    """
+    
+    @needs_lapack
+    def test_linalg_lstsq(self):
+        """
+        Test np.linalg.qr
+        """
+        cfunc = jit(nopython=True)(lstsq_system)
+
+        def check(A, B, **kwargs):
+            print("Inputs")
+            print("A=",A)
+            print("B=",B)
+            expected = lstsq_system(A, B, **kwargs)
+            got = cfunc(A, B, **kwargs)
+
+            # check that the returned tuple is same length
+            self.assertEqual(len(expected), len(got))
+            # and that length is 4
+            self.assertEqual(len(got), 4)
+            # and that the computed results are contig and in the same way
+            self.assert_contig_sanity(got, "C")
+
+            
+            use_reconstruction = False
+            # try plain match of each array to np first
+            for k in range(len(expected)):
+                try:
+                    # check the shape is the same
+                    np.testing.assert_array_almost_equal_nulp(
+                        got[k], expected[k], nulp=10)
+                #except AssertionError:
+                except Exception:
+                    #import pdb; pdb.set_trace()
+                    # plain match failed, test by reconstruction
+                    use_reconstruction = True
+
+        # test: column vector, tall, wide, square, row vector
+        # prime sizes, the A's
+        sizes = [(7, 1), (11, 5), (5, 11), (3, 3), (1, 7)]
+        # compatible B's for Ax=B must have same number of rows and 1 or more columns
+        
+        # test loop
+        for a_size, a_dtype, a_order in \
+                product(sizes, self.dtypes, 'FC'):
+
+            # A matrix for this loop
+            A = self.orth_fact_sample_matrix(a_size, a_dtype, a_order)
+            
+            
+            # test solve Ax=B for (column, matrix) B, same dtype and order juggle as A
+            b_sizes = (1, 13)
+            for b_size, b_dtype, b_order in \
+                product(b_sizes, self.dtypes, 'FC'):
+                B = self.orth_fact_sample_matrix((a_size[0], b_size), b_dtype, b_order)
+                check(A, B)
 
 if __name__ == '__main__':
     unittest.main()

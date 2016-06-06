@@ -1111,12 +1111,72 @@ def qr_impl(a):
 
     return qr_impl
 
+
+
+# helpers for np.linalg.lstsq
+def _check_linalg_1d_matrix(a, func_name):
+    if not isinstance(a, types.Array):
+        raise TypingError("np.linalg.%s() only supported for array types"
+                          % func_name)
+    if not a.ndim <= 2:
+        raise TypingError("np.linalg.%s() only supported on 1 and 2-D arrays."
+                          % func_name)
+    if not isinstance(a.dtype, (types.Float, types.Complex)):
+        raise TypingError("np.linalg.%s() only supported on "
+                          "float and complex arrays." % func_name)
+
+def _get_res_impl(dtype, real_dtype):
+    if isinstance(dtype, (types.Complex)):
+        @jit(nopython=True)
+        def cmplx_impl(B, n, nrhs):
+                res = np.empty((nrhs), dtype=real_dtype)
+                for k in range(nrhs):
+                    res[k]=np.sum(np.abs(B[n:, k])**2)
+                return res
+        return cmplx_impl
+    else:
+        @jit(nopython=True)
+        def real_impl(B, n, nrhs):
+                res = np.empty((nrhs), dtype=real_dtype)
+                for k in range(nrhs):
+                    res[k]=np.sum(B[n:, k]**2)
+                return res
+        return real_impl
+   
+def _get_copy_in_b_impl(b):
+    ndim = b.ndim
+    if ndim == 1:
+        @jit(nopython=True)
+        def oneD_impl(bcpy, b, nrhs, maxmn):
+            bcpy[:, 0] = b
+        return oneD_impl
+    else:
+        @jit(nopython=True)
+        def twoD_impl(bcpy, b, nrhs, maxmn):
+            bcpy[:b.shape[-2], :nrhs] = b
+        return twoD_impl
+    
+def _get_compute_return_impl(b):
+    ndim = b.ndim
+    if ndim == 1:
+        @jit(nopython=True)
+        def oneD_impl(b, n):
+            return b.T.ravel()[:n]
+        return oneD_impl
+    else:
+        @jit(nopython=True)
+        def twoD_impl(b, n):
+            return b[:n,:]
+        return twoD_impl
+
 @overload(np.linalg.lstsq)
 def lstsq_impl(a, b, rcond=-1):
     ensure_lapack()
 
     _check_linalg_matrix(a, "lstsq")
-    _check_linalg_matrix(b, "lstsq")
+    
+    # B can be 1D or 2D.
+    #_check_linalg_matrix(b, "lstsq")
 
     a_F_layout = a.layout == 'F'
     b_F_layout = b.layout == 'F'
@@ -1137,11 +1197,6 @@ def lstsq_impl(a, b, rcond=-1):
 
     np_shared_dt = np.promote_types(type_table[a.dtype], type_table[b.dtype])
     nb_shared_dt = inv_type_table[np_shared_dt]
-        
-    # is the result going to be complex? Use to reduce operations later.
-    complex_result = False
-    if np_shared_dt in (np.complex64, np.complex128):
-        complex_result = True
               
     # convert typing floats to np floats for use in the impl
     r_type = getattr(nb_shared_dt, "underlying_float", nb_shared_dt)
@@ -1169,6 +1224,15 @@ def lstsq_impl(a, b, rcond=-1):
 
     kind = ord(get_blas_kind(nb_shared_dt, "lstsq"))
 
+    # get a specialised residual computation based on the dtype
+    compute_res = _get_res_impl(nb_shared_dt, real_dtype)
+    
+    # b copy function
+    b_copy_in = _get_copy_in_b_impl(b)
+    
+    # return blob function
+    b_ret = _get_compute_return_impl(b)
+
     def lstsq_impl(a, b, rcond=-1):
         n = a.shape[-1]
         m = a.shape[-2]
@@ -1181,7 +1245,6 @@ def lstsq_impl(a, b, rcond=-1):
         minmn = min(m, n)
         maxmn = max(m, n)
 
-
         # a is destroyed on exit
         acpy = a.astype(np_shared_dt)
         if a_F_layout:
@@ -1191,9 +1254,8 @@ def lstsq_impl(a, b, rcond=-1):
 
 
         ## b is overwritten on exit with the solution, copy allocate
-        bcpy = np.zeros((nrhs, maxmn), dtype=np_shared_dt).T
-        bcpy[:b.shape[-2], :nrhs] = b
-
+        bcpy = np.empty((nrhs, maxmn), dtype=np_shared_dt).T
+        b_copy_in(bcpy, b, nrhs, maxmn)
            
         ## Allocate returns
         s = np.empty(minmn, dtype=real_dtype)
@@ -1225,20 +1287,12 @@ def lstsq_impl(a, b, rcond=-1):
         if rank < n or m <= n:
             res = np.empty((0), dtype=real_dtype)
         else:
-            res = np.empty((nrhs), dtype=real_dtype)
-            # The branching below is to save an abs() in real case as its 
-            # squared anyway.
-            # This ought to work, but doesn't as complex->float cast is 
-            # needed, bug?
-            #if complex_result:
-                #for k in range(nrhs):
-                    #res[k]=np.sum(np.abs(bcpy[n:, k])**2)
-            #else:
-                #for k in range(nrhs):
-                    #res[k]=np.sum(bcpy[n:, k]**2)
-            for k in range(nrhs):
-                res[k]=np.sum(np.abs(bcpy[n:, k])**2)
+            # this requires additional dispatch as there's a faster
+            # impl if the result is in the real domain (no abs() required)
+            res = compute_res(bcpy, n, nrhs)
        
+        x = b_ret(bcpy, n).copy()
+
         ## help liveness analysis
         acpy.size
         bcpy.size
@@ -1246,7 +1300,7 @@ def lstsq_impl(a, b, rcond=-1):
         rcond_ptr.size
         rank_ptr.size
 
-        return (bcpy[:n,:], res, rank, s[:minmn])
+        return (x, res, rank, s[:minmn])
 
     return lstsq_impl
 
