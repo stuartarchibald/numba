@@ -1116,10 +1116,10 @@ def qr_impl(a):
 # helpers for np.linalg.lstsq
 def _check_linalg_1d_matrix(a, func_name):
     if not isinstance(a, types.Array):
-        raise TypingError("np.linalg.%s() only supported for array types"
+        raise TypingError("np.linalg.%s() only supported for array types "
                           % func_name)
     if not a.ndim <= 2:
-        raise TypingError("np.linalg.%s() only supported on 1 and 2-D arrays."
+        raise TypingError("np.linalg.%s() only supported on 1 and 2-D arrays "
                           % func_name)
     if not isinstance(a.dtype, (types.Float, types.Complex)):
         raise TypingError("np.linalg.%s() only supported on "
@@ -1211,7 +1211,7 @@ def lstsq_impl(a, b, rcond=-1):
     _check_linalg_matrix(a, "lstsq")
     
     # B can be 1D or 2D.
-    #_check_linalg_matrix(b, "lstsq")
+    _check_linalg_1d_matrix(b, "lstsq")
 
     a_F_layout = a.layout == 'F'
     b_F_layout = b.layout == 'F'
@@ -1289,7 +1289,6 @@ def lstsq_impl(a, b, rcond=-1):
             acpy = np.copy(acpy)
         else:
             acpy = np.asfortranarray(acpy)
-
 
         ## b is overwritten on exit with the solution, copy allocate
         bcpy = np.empty((nrhs, maxmn), dtype=np_shared_dt).T
