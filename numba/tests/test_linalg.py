@@ -894,11 +894,11 @@ class TestLinalgLstsq(TestLinalgBase):
         cfunc = jit(nopython=True)(lstsq_system)
 
         def check(A, B, **kwargs):
-            print("Inputs")
-            print("A=",A)
-            print("B=",B)
             expected = lstsq_system(A, B, **kwargs)
-            got = cfunc(A, B, **kwargs)
+            try:
+                got = cfunc(A, B, **kwargs)
+            except ValueError:
+                import pdb; pdb.set_trace()
 
             # check that the returned tuple is same length
             self.assertEqual(len(expected), len(got))
@@ -912,14 +912,51 @@ class TestLinalgLstsq(TestLinalgBase):
             # try plain match of each array to np first
             for k in range(len(expected)):
                 try:
-                    # check the shape is the same
                     np.testing.assert_array_almost_equal_nulp(
                         got[k], expected[k], nulp=10)
-                #except AssertionError:
-                except Exception:
-                    #import pdb; pdb.set_trace()
+                except AssertionError:
                     # plain match failed, test by reconstruction
                     use_reconstruction = True
+                    
+            if use_reconstruction:
+                x, res, rank, s = got
+                
+                # check they are dimensionally correct, skip [2] = rank.
+                for k in [0, 1, 3]:
+                    if isinstance(expected[k], np.ndarray):
+                        self.assertEqual(got[k].shape, expected[k].shape)
+                
+                # check the ranks are the same
+                self.assertEqual(rank, expected[2])
+                
+                # check if A*X = B
+                resolution = np.finfo(A.dtype).resolution
+                try:
+                    rec = np.dot(A, x)
+                    np.testing.assert_allclose(
+                        B,
+                        rec,
+                        rtol=10 * resolution,
+                        atol=10 * resolution
+                    )
+                except AssertionError:
+                    # system is probably under/over determined and/or
+                    # poorly conditioned. Check slackened equality
+                    # and that the residual norm is the same.
+                    for k in [0, 1, 3]:
+                        if isinstance(expected[k], np.ndarray):
+                            resolution = np.finfo(A.dtype).resolution
+                            np.testing.assert_allclose(
+                                expected[k],
+                                got[k],
+                                rtol=100 * resolution,
+                                atol=100 * resolution
+                            )
+                    res_expected = np.linalg.norm(B - np.dot(A, expected[0]))
+                    res_got = np.linalg.norm(B - np.dot(A, x))
+                    np.testing.assert_allclose(res_expected, res_got, rtol=5*resolution)
+                
+                
 
         # test: column vector, tall, wide, square, row vector
         # prime sizes, the A's
@@ -938,8 +975,15 @@ class TestLinalgLstsq(TestLinalgBase):
             b_sizes = (1, 13)
             for b_size, b_dtype, b_order in \
                 product(b_sizes, self.dtypes, 'FC'):
+            
+                # check 2D B
                 B = self.orth_fact_sample_matrix((a_size[0], b_size), b_dtype, b_order)
                 check(A, B)
+                
+                # check 1D B
+                tmp=np.empty(a_size[0] ,dtype=b_dtype, order=b_order)
+                tmp[:]=B[:,0]
+                check(A, tmp)
 
 if __name__ == '__main__':
     unittest.main()

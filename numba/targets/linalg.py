@@ -1125,34 +1125,56 @@ def _check_linalg_1d_matrix(a, func_name):
         raise TypingError("np.linalg.%s() only supported on "
                           "float and complex arrays." % func_name)
 
-def _get_res_impl(dtype, real_dtype):
-    if isinstance(dtype, (types.Complex)):
-        @jit(nopython=True)
-        def cmplx_impl(B, n, nrhs):
-                res = np.empty((nrhs), dtype=real_dtype)
-                for k in range(nrhs):
-                    res[k]=np.sum(np.abs(B[n:, k])**2)
-                return res
-        return cmplx_impl
+def _get_res_impl(dtype, real_dtype, b):
+    ndim = b.ndim
+    if ndim == 1:
+        if isinstance(dtype, (types.Complex)):
+            @jit(nopython=True)
+            def cmplx_impl(B, n, nrhs):
+                    res = np.empty((1,), dtype=real_dtype)
+                    for k in range(1):
+                        res[k]=np.sum(np.abs(B[n:, k])**2)
+                    return res
+            return cmplx_impl
+        else:
+            @jit(nopython=True)
+            def real_impl(B, n, nrhs):
+                    res = np.empty((1,), dtype=real_dtype)
+                    for k in range(1):
+                        res[k]=np.sum(B[n:, k]**2)
+                    return res
+            return real_impl       
     else:
-        @jit(nopython=True)
-        def real_impl(B, n, nrhs):
-                res = np.empty((nrhs), dtype=real_dtype)
-                for k in range(nrhs):
-                    res[k]=np.sum(B[n:, k]**2)
-                return res
-        return real_impl
+        if isinstance(dtype, (types.Complex)):
+            @jit(nopython=True)
+            def cmplx_impl(B, n, nrhs):
+                    res = np.empty((nrhs), dtype=real_dtype)
+                    for k in range(nrhs):
+                        res[k]=np.sum(np.abs(B[n:, k])**2)
+                    return res
+            return cmplx_impl
+        else:
+            @jit(nopython=True)
+            def real_impl(B, n, nrhs):
+                    res = np.empty((nrhs), dtype=real_dtype)
+                    for k in range(nrhs):
+                        res[k]=np.sum(B[n:, k]**2)
+                    return res
+            return real_impl
    
 def _get_copy_in_b_impl(b):
     ndim = b.ndim
     if ndim == 1:
         @jit(nopython=True)
-        def oneD_impl(bcpy, b, nrhs, maxmn):
-            bcpy[:, 0] = b
+        def oneD_impl(bcpy, b, nrhs):
+            #print(bcpy.shape[0])
+            #print(bcpy.shape[1])
+            #print(b.shape[0])
+            bcpy[:b.shape[0], 0] = b
         return oneD_impl
     else:
         @jit(nopython=True)
-        def twoD_impl(bcpy, b, nrhs, maxmn):
+        def twoD_impl(bcpy, b, nrhs):
             bcpy[:b.shape[-2], :nrhs] = b
         return twoD_impl
     
@@ -1166,7 +1188,20 @@ def _get_compute_return_impl(b):
     else:
         @jit(nopython=True)
         def twoD_impl(b, n):
-            return b[:n,:]
+            return b[:n,:].copy()
+        return twoD_impl
+    
+def _get_compute_nrhs(b):
+    ndim = b.ndim
+    if ndim == 1:
+        @jit(nopython=True)
+        def oneD_impl(b):
+            return 1
+        return oneD_impl
+    else:
+        @jit(nopython=True)
+        def twoD_impl(b):
+            return b.shape[-1]
         return twoD_impl
 
 @overload(np.linalg.lstsq)
@@ -1224,8 +1259,11 @@ def lstsq_impl(a, b, rcond=-1):
 
     kind = ord(get_blas_kind(nb_shared_dt, "lstsq"))
 
+    # get a specialisation for computing the number of RHS
+    b_nrhs = _get_compute_nrhs(b)
+
     # get a specialised residual computation based on the dtype
-    compute_res = _get_res_impl(nb_shared_dt, real_dtype)
+    compute_res = _get_res_impl(nb_shared_dt, real_dtype, b)
     
     # b copy function
     b_copy_in = _get_copy_in_b_impl(b)
@@ -1236,7 +1274,7 @@ def lstsq_impl(a, b, rcond=-1):
     def lstsq_impl(a, b, rcond=-1):
         n = a.shape[-1]
         m = a.shape[-2]
-        nrhs = b.shape[-1]
+        nrhs = b_nrhs(b)
 
         _check_finite_matrix(a)
         _check_finite_matrix(b)
@@ -1255,7 +1293,7 @@ def lstsq_impl(a, b, rcond=-1):
 
         ## b is overwritten on exit with the solution, copy allocate
         bcpy = np.empty((nrhs, maxmn), dtype=np_shared_dt).T
-        b_copy_in(bcpy, b, nrhs, maxmn)
+        b_copy_in(bcpy, b, nrhs)
            
         ## Allocate returns
         s = np.empty(minmn, dtype=real_dtype)
@@ -1291,7 +1329,7 @@ def lstsq_impl(a, b, rcond=-1):
             # impl if the result is in the real domain (no abs() required)
             res = compute_res(bcpy, n, nrhs)
        
-        x = b_ret(bcpy, n).copy()
+        x = b_ret(bcpy, n)
 
         ## help liveness analysis
         acpy.size
