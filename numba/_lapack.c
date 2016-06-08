@@ -468,6 +468,12 @@ EMIT_GET_CLAPACK_FUNC(dgelsd)
 EMIT_GET_CLAPACK_FUNC(cgelsd)
 EMIT_GET_CLAPACK_FUNC(zgelsd)
 
+// Computes the solution to a system of linear equations
+EMIT_GET_CLAPACK_FUNC(sgesv)
+EMIT_GET_CLAPACK_FUNC(dgesv)
+EMIT_GET_CLAPACK_FUNC(cgesv)
+EMIT_GET_CLAPACK_FUNC(zgesv)
+
 
 #undef EMIT_GET_CLAPACK_FUNC
 
@@ -512,6 +518,9 @@ typedef void (*cgelsd_t)(F_INT *m, F_INT *n, F_INT *nrhs, void *a, F_INT *lda,
                          void *b, F_INT *ldb, void *s, void *rcond, F_INT *rank,
                          void *work, F_INT *lwork, void *rwork, F_INT *iwork,
                          F_INT *info);
+
+typedef void (*xgesv_t)(F_INT *n, F_INT *nrhs, void *a, F_INT *lda, F_INT *ipiv,
+                        void *b, F_INT *ldb, F_INT *info);
 
 
 
@@ -1563,6 +1572,52 @@ numba_ez_gelsd(char kind, Py_ssize_t m, Py_ssize_t n, Py_ssize_t nrhs,
                                    rank);
     }
     return STATUS_ERROR; /* unreachable */
+}
+
+
+/*
+ * Compute the solution to a system of linear equations
+ * Return -1 on internal error, 0 on success.
+ * info may be checked for > 0 as an indicator of singularity
+ * in the provided `a` matrix.
+ */
+NUMBA_EXPORT_FUNC(int)
+numba_xgesv(char kind, Py_ssize_t n, Py_ssize_t nrhs, void *a, Py_ssize_t lda,
+            F_INT *ipiv, void *b, Py_ssize_t ldb, Py_ssize_t *info)
+{
+    void *raw_func = NULL;
+    F_INT _n, _nrhs, _lda, _ldb, _info;
+
+    ENSURE_VALID_KIND(kind)
+
+    switch (kind)
+    {
+        case 's':
+            raw_func = get_clapack_sgesv();
+            break;
+        case 'd':
+            raw_func = get_clapack_dgesv();
+            break;
+        case 'c':
+            raw_func = get_clapack_cgesv();
+            break;
+        case 'z':
+            raw_func = get_clapack_zgesv();
+            break;
+    }
+    if (raw_func == NULL)
+        return -1;
+
+    _n = (F_INT) n;
+    _nrhs = (F_INT) nrhs;
+    _lda = (F_INT) lda;
+    _ldb = (F_INT) ldb;
+
+    (*(xgesv_t) raw_func)(&_n, &_nrhs, a, &_lda, ipiv, b, &_ldb, &_info);
+    CATCH_LAPACK_INVALID_ARG("xgesv", _info);
+    *info = (Py_ssize_t)_info;
+
+    return 0;
 }
 
 /* undef defines and macros */
