@@ -6,6 +6,7 @@ import sys
 import os
 import re
 import warnings
+import multiprocessing
 
 import llvmlite.binding as ll
 
@@ -197,6 +198,11 @@ class _EnvReloader(object):
 
         # Disable HSA support
         DISABLE_HSA = _readenv("NUMBA_DISABLE_HSA", int, 0)
+
+        # Numba thread pool size (defaults to number of CPUs on the system)
+        NUMBA_NUM_THREADS = _readenv("NUMBA_NUM_THREADS", int,
+                                     multiprocessing.cpu_count())
+
         # Inject the configuration values into the module globals
         for name, value in locals().copy().items():
             if name.isupper():
