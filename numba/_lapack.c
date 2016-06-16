@@ -1577,16 +1577,13 @@ numba_ez_gelsd(char kind, Py_ssize_t m, Py_ssize_t n, Py_ssize_t nrhs,
 
 /*
  * Compute the solution to a system of linear equations
- * Return -1 on internal error, 0 on success.
- * info may be checked for > 0 as an indicator of singularity
- * in the provided `a` matrix.
  */
 NUMBA_EXPORT_FUNC(int)
 numba_xgesv(char kind, Py_ssize_t n, Py_ssize_t nrhs, void *a, Py_ssize_t lda,
-            F_INT *ipiv, void *b, Py_ssize_t ldb, Py_ssize_t *info)
+            F_INT *ipiv, void *b, Py_ssize_t ldb)
 {
     void *raw_func = NULL;
-    F_INT _n, _nrhs, _lda, _ldb, _info;
+    F_INT _n, _nrhs, _lda, _ldb, info;
 
     ENSURE_VALID_KIND(kind)
 
@@ -1605,19 +1602,17 @@ numba_xgesv(char kind, Py_ssize_t n, Py_ssize_t nrhs, void *a, Py_ssize_t lda,
             raw_func = get_clapack_zgesv();
             break;
     }
-    if (raw_func == NULL)
-        return -1;
+    ENSURE_VALID_FUNC(raw_func)
 
     _n = (F_INT) n;
     _nrhs = (F_INT) nrhs;
     _lda = (F_INT) lda;
     _ldb = (F_INT) ldb;
 
-    (*(xgesv_t) raw_func)(&_n, &_nrhs, a, &_lda, ipiv, b, &_ldb, &_info);
-    CATCH_LAPACK_INVALID_ARG("xgesv", _info);
-    *info = (Py_ssize_t)_info;
+    (*(xgesv_t) raw_func)(&_n, &_nrhs, a, &_lda, ipiv, b, &_ldb, &info);
+    CATCH_LAPACK_INVALID_ARG("xgesv", info);
 
-    return 0;
+    return (int)info;
 }
 
 /* undef defines and macros */

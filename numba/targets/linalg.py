@@ -609,7 +609,6 @@ def _handle_err_maybe_convergence_problem(r):
             raise ValueError("Internal algorithm failed to converge.")
 
 
-
 def _check_linalg_1_or_2d_matrix(a, func_name):
     # checks that a matrix is 1 or 2D
     if not isinstance(a, types.Array):
@@ -1312,10 +1311,9 @@ def solve_impl(a, b):
         types.intp,  # nhrs
         types.CPointer(nb_shared_dt),  # a
         types.intp,  # lda
-        types.CPointer(types.intc),  # ipiv
+        types.CPointer(F_INT_nbtype),  # ipiv
         types.CPointer(nb_shared_dt),  # b
-        types.intp,  # ldb
-        types.CPointer(types.intc)  # info
+        types.intp  # ldb
     )
 
     # the lapack wrapper function
@@ -1360,8 +1358,7 @@ def solve_impl(a, b):
         b_copy_in(bcpy, b, nrhs)
 
         # allocate pivot array (needs to be fortran int size)
-        ipiv = np.empty(n, dtype=np.int32)
-        info = np.zeros((1,), dtype=np.int32)
+        ipiv = np.empty(n, dtype=F_INT_nptype)
 
         r = numba_xgesv(
             kind,  # kind
@@ -1371,23 +1368,22 @@ def solve_impl(a, b):
             n,  # lda
             ipiv.ctypes,  # ipiv
             bcpy.ctypes,  # b
-            n,  # ldb
-            info.ctypes  # info
+            n  # ldb
         )
 
-        if r < 0:
-            fatal_error_func()
-            assert 0   # unreachable
+        if r != 0:
+            if r < 0:
+                fatal_error_func()
+                assert 0   # unreachable
 
-        if info[0] > 0:
-            raise np.linalg.LinAlgError(
-                "Matrix is singular to machine precision.")
+            if r > 0:
+                raise np.linalg.LinAlgError(
+                    "Matrix is singular to machine precision.")
 
         # help liveness analysis
         acpy.size
         bcpy.size
         ipiv.size
-        info.size
 
         return b_ret(bcpy)
 
