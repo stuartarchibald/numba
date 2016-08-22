@@ -968,6 +968,133 @@ if numpy_version >= (1, 8):
         else:
             return real_eig_impl
 
+    @overload(np.linalg.eigvals)
+    def eigvals_impl(a):
+        ensure_lapack()
+
+        _check_linalg_matrix(a, "eigvals")
+
+        numba_ez_rgeev = _LAPACK().numba_ez_rgeev(a.dtype)
+        numba_ez_cgeev = _LAPACK().numba_ez_cgeev(a.dtype)
+
+        kind = ord(get_blas_kind(a.dtype, "eigvals"))
+
+        JOBVL = ord('N')
+        JOBVR = ord('N')
+
+        F_layout = a.layout == 'F'
+
+        def real_eigvals_impl(a):
+            """
+            eigvals() implementation for real arrays.
+            """
+            n = a.shape[-1]
+            if a.shape[-2] != n:
+                msg = "Last 2 dimensions of the array must be square."
+                raise np.linalg.LinAlgError(msg)
+
+            _check_finite_matrix(a)
+
+            if F_layout:
+                acpy = np.copy(a)
+            else:
+                acpy = np.asfortranarray(a)
+
+            ldvl = 1
+            ldvr = 1
+            wr = np.empty(n, dtype=a.dtype)
+            wi = np.empty(n, dtype=a.dtype)
+            
+            # not referenced but need setting for MKL null check
+            vl = np.empty((1), dtype=a.dtype)
+            vr = np.empty((1), dtype=a.dtype)
+
+            r = numba_ez_rgeev(kind,
+                               JOBVL,
+                               JOBVR,
+                               n,
+                               acpy.ctypes,
+                               n,
+                               wr.ctypes,
+                               wi.ctypes,
+                               vl.ctypes,
+                               ldvl,
+                               vr.ctypes,
+                               ldvr)
+            _handle_err_maybe_convergence_problem(r)
+
+            # By design numba does not support dynamic return types, however,
+            # Numpy does. Numpy uses this ability in the case of returning
+            # eigenvalues/vectors of a real matrix. The return type of
+            # np.linalg.eigvals(), when operating on a matrix in real space
+            # depends on the values present in the matrix itself (recalling
+            # that eigenvalues are the roots of the characteristic polynomial
+            # of the system matrix, which will by construction depend on the
+            # values present in the system matrix). As numba cannot handle
+            # the case of a runtime decision based domain change relative to
+            # the input type, if it is required numba raises as below.
+            if np.any(wi):
+                raise ValueError(
+                    "eigvals() argument must not cause a domain change.")
+
+            # put these in to help with liveness analysis,
+            # `.ctypes` doesn't keep the vars alive
+            acpy.size
+            vl.size
+            vr.size
+            wr.size
+            wi.size
+            return wr
+
+        def cmplx_eigvals_impl(a):
+            """
+            eigvals() implementation for complex arrays.
+            """
+            n = a.shape[-1]
+            if a.shape[-2] != n:
+                msg = "Last 2 dimensions of the array must be square."
+                raise np.linalg.LinAlgError(msg)
+
+            _check_finite_matrix(a)
+
+            if F_layout:
+                acpy = np.copy(a)
+            else:
+                acpy = np.asfortranarray(a)
+
+            ldvl = 1
+            ldvr = n
+            w = np.empty(n, dtype=a.dtype)
+            vl = np.empty((1), dtype=a.dtype)
+            vr = np.empty((1), dtype=a.dtype)
+
+            r = numba_ez_cgeev(kind,
+                               JOBVL,
+                               JOBVR,
+                               n,
+                               acpy.ctypes,
+                               n,
+                               w.ctypes,
+                               vl.ctypes,
+                               ldvl,
+                               vr.ctypes,
+                               ldvr)
+            _handle_err_maybe_convergence_problem(r)
+
+            # put these in to help with liveness analysis,
+            # `.ctypes` doesn't keep the vars alive
+            acpy.size
+            vl.size
+            vr.size
+            w.size
+            return w
+
+        if isinstance(a.dtype, types.scalars.Complex):
+            return cmplx_eigvals_impl
+        else:
+            return real_eigvals_impl
+
+
     @overload(np.linalg.svd)
     def svd_impl(a, full_matrices=1):
         ensure_lapack()

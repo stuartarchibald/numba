@@ -317,6 +317,10 @@ def eig_matrix(a):
     return np.linalg.eig(a)
 
 
+def eigvals_matrix(a):
+    return np.linalg.eigvals(a)
+
+
 def svd_matrix(a, full_matrices=1):
     return np.linalg.svd(a, full_matrices)
 
@@ -789,9 +793,9 @@ class TestLinalgCholesky(TestLinalgBase):
                            (np.ones(4, dtype=np.float64).reshape(2, 2),))
 
 
-class TestLinalgEig(TestLinalgBase):
+class TestLinalgEigenSystems(TestLinalgBase):
     """
-    Tests for np.linalg.eig.
+    Tests for np.linalg.eig/eigvals.
     """
 
     def sample_matrix(self, m, dtype, order):
@@ -805,25 +809,30 @@ class TestLinalgEig(TestLinalgBase):
         Q = np.array(Q, dtype=dtype, order=order)
         return Q
 
-    def assert_no_domain_change(self, cfunc, args):
-        msg = "eig() argument must not cause a domain change."
+    def assert_no_domain_change(self, name, cfunc, args):
+        msg = name + "() argument must not cause a domain change."
         self.assert_error(cfunc, args, msg)
-
-    @needs_lapack
-    def test_linalg_eig(self):
+    
+    def checker_for_linalg_eig(self, name, func, expected_res_len):
         """
         Test np.linalg.eig
         """
         n = 10
-        cfunc = jit(nopython=True)(eig_matrix)
-
+        cfunc = jit(nopython=True)(func)
+     
         def check(a):
-            expected = eig_matrix(a)
+            expected = func(a)
             got = cfunc(a)
             # check that the returned tuple is same length
             self.assertEqual(len(expected), len(got))
-            # and that length is 2
-            self.assertEqual(len(got), 2)
+            # and that dimension is correct
+            res_is_tuple = False
+            if isinstance(got, tuple):
+                res_is_tuple=True
+                self.assertEqual(len(got), expected_res_len)
+            else: # its an array
+                self.assertEqual(got.ndim, expected_res_len)
+                
             # and that the computed results are contig and in the same way
             self.assert_contig_sanity(got, "F")
 
@@ -845,17 +854,33 @@ class TestLinalgEig(TestLinalgBase):
             # sensitive, numba using the type specific routines therefore
             # sometimes comes out with a different (but entirely
             # valid) answer (eigenvectors are not unique etc.).
+            # This is only applicable if eigenvectors are computed
+            # along with eigenvalues i.e. result is a tuple.
+            resolution = 5 * np.finfo(a.dtype).resolution
             if use_reconstruction:
-                w, v = got
-                lhs = np.dot(a, v)
-                rhs = np.dot(v, np.diag(w))
-                resolution = 5 * np.finfo(a.dtype).resolution
-                np.testing.assert_allclose(
-                    lhs,
-                    rhs,
-                    rtol=resolution,
-                    atol=resolution
-                )
+                if res_is_tuple:
+                    w, v = got
+                    lhs = np.dot(a, v)
+                    rhs = np.dot(v, np.diag(w))
+                    np.testing.assert_allclose(
+                        lhs,
+                        rhs,
+                        rtol=resolution,
+                        atol=resolution
+                    )
+                else:
+                    # This isn't technically reconstruction but is here to
+                    # deal with that the order of the returned eigenvalues
+                    # may differ in the case of routines just returning
+                    # eigenvalues and there's no true reconstruction
+                    # available with which to perform a check.
+                    np.testing.assert_allclose(
+                        np.sort(expected),
+                        np.sort(got),
+                        rtol=resolution,
+                        atol=resolution
+                    )
+
 
             # Ensure proper resource management
             with self.assertNoNRTLeak():
@@ -865,19 +890,17 @@ class TestLinalgEig(TestLinalgBase):
             a = self.sample_matrix(n, dtype, order)
             check(a)
 
-        rn = "eig"
-
         # test both a real and complex type as the impls are different
         for ty in [np.float32, np.complex64]:
             # Non square matrices
             self.assert_non_square(cfunc, (np.ones((2, 3), dtype=ty),))
 
             # Wrong dtype
-            self.assert_wrong_dtype(rn, cfunc,
+            self.assert_wrong_dtype(name, cfunc,
                                     (np.ones((2, 2), dtype=np.int32),))
 
             # Dimension issue
-            self.assert_wrong_dimensions(rn, cfunc, (np.ones(10, dtype=ty),))
+            self.assert_wrong_dimensions(name, cfunc, (np.ones(10, dtype=ty),))
 
             # no nans or infs
             self.assert_no_nan_or_inf(cfunc,
@@ -901,12 +924,20 @@ class TestLinalgEig(TestLinalgBase):
         A = np.array([[1, -2], [2, 1]])
         check(A.astype(np.complex128))
         # and that the imaginary part is nonzero
-        l, _ = eig_matrix(A)
+        l, _ = func(A)
         self.assertTrue(np.any(l.imag))
 
         # Now check that the computation fails in real space
         for ty in [np.float32, np.float64]:
-            self.assert_no_domain_change(cfunc, (A.astype(ty),))
+            self.assert_no_domain_change(name, cfunc, (A.astype(ty),))
+
+    @needs_lapack
+    def test_linalg_eig(self):
+        self.checker_for_linalg_eig("eig", eig_matrix, 2)
+
+    @needs_lapack
+    def test_linalg_eigvals(self):
+        self.checker_for_linalg_eig("eigvals", eigvals_matrix, 1)
 
 
 class TestLinalgSvd(TestLinalgBase):
