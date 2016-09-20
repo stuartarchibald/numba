@@ -177,6 +177,19 @@ class _LAPACK:
         return types.ExternalFunction("numba_ez_cgeev", sig)
 
     @classmethod
+    def numba_ez_xxxevd(cls, dtype):
+        wtype = getattr(dtype, "underlying_float", dtype)
+        sig = types.intc(types.char,             # kind
+                         types.char,             # jobz
+                         types.char,             # uplo
+                         types.intp,             # n
+                         types.CPointer(dtype),  # a
+                         types.intp,             # lda
+                         types.CPointer(wtype),  # w
+                        )
+        return types.ExternalFunction("numba_ez_xxxevd", sig)
+    
+    @classmethod
     def numba_xxpotrf(cls, dtype):
         sig = types.intc(types.char,             # kind
                          types.char,             # uplo
@@ -1093,6 +1106,60 @@ if numpy_version >= (1, 8):
             return cmplx_eigvals_impl
         else:
             return real_eigvals_impl
+
+    @overload(np.linalg.eigh)
+    def eigh_impl(a):
+        ensure_lapack()
+        
+        _check_linalg_matrix(a, "eigh")
+
+        F_layout = a.layout == 'F'
+        
+        # convert typing floats to numpy floats for use in the impl
+        w_type = getattr(a.dtype, "underlying_float", a.dtype)
+        w_dtype = np_support.as_dtype(w_type)
+
+        numba_ez_xxxevd = _LAPACK().numba_ez_xxxevd(a.dtype)
+
+        kind = ord(get_blas_kind(a.dtype, "eigh"))
+
+        JOBZ = ord('V')
+        UPLO = ord('L')
+        
+        def eigh_impl(a):
+            n = a.shape[-1]
+
+            if a.shape[-2] != n:
+                msg = "Last 2 dimensions of the array must be square."
+                raise np.linalg.LinAlgError(msg)
+
+            _check_finite_matrix(a)
+            
+            
+            if F_layout:
+                acpy = np.copy(a)
+            else:
+                acpy = np.asfortranarray(a)
+    
+            w = np.empty(n, dtype=w_dtype)
+            
+            r = numba_ez_xxxevd(kind,  # kind
+                                JOBZ,  # jobz
+                                UPLO,  # uplo
+                                n,  # n
+                                acpy.ctypes,  # a
+                                n,  # lda
+                                w.ctypes  # w
+                                )
+            _handle_err_maybe_convergence_problem(r)
+
+            # help liveness analysis
+            acpy.size
+            w.size            
+            
+            return (w, acpy)
+        
+        return eigh_impl
 
 
     @overload(np.linalg.svd)
