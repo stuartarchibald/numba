@@ -140,6 +140,13 @@ class PyLower(BaseLower):
                 exc = None
             self.pyapi.raise_object(exc)
             self.return_exception_raised()
+            
+        elif isinstance(inst, ir.StaticRaise):
+            if inst.exc_class is None:
+                # re-raise
+                self.return_exception(None)
+            else:
+                self.return_exception(inst.exc_class, inst.exc_args)
 
         else:
             raise NotImplementedError(type(inst), inst)
