@@ -26,9 +26,9 @@ It determines the visible signature of the C callback::
 
 The C function object exposes the address of the compiled C callback as
 the :attr:`~CFunc.address` attribute, so that you can pass it to any
-foreign C or C++ library.  It also exposes a :mod:`ctypes` callback
-object pointing to that callback; that object is also callable from
-Python, making it easy to check the compiled code::
+foreign C or C++ library (see C library example below).  It also exposes
+a :mod:`ctypes` callback object pointing to that callback; that object is
+also callable from Python, making it easy to check the compiled code::
 
    @cfunc("float64(float64, float64)")
    def add(x, y):
@@ -131,3 +131,106 @@ Compilation options
 A number of keyword-only arguments can be passed to the ``@cfunc``
 decorator: ``nopython`` and ``cache``.  Their meaning is similar to those
 in the ``@jit`` decorator.
+
+C Library Example
+=================
+
+As noted above the address of the callback is exposed via the 
+:attr:`~CFunc.address` attribute. As a result it is possible to use this
+to call the function directly from C/C++ code. This example creates two
+``cfunc`` functions, both with the same signature, and then calls them from a C
+extension library (Python 2.7 style API):
+
+.. code-block:: c
+
+    #include "Python.h"
+    #include <stdio.h>
+
+    // signature to match the Python cfunc signature
+    typedef double (*func_t)(double, double);
+
+    static PyObject * call_cfunc(PyObject *self, PyObject *args) {
+        PyObject *obj = NULL, *ret = NULL;
+        func_t func_inst;
+        double res;
+        
+        // unpack the argument
+        if(!PyArg_ParseTuple(args, "O", &obj)) return NULL;
+        
+        // get the address and assign it to the function pointer
+        func_inst = PyLong_AsVoidPtr(obj);
+        if(PyErr_Occurred()) return NULL;
+        
+        // make the call
+        res = func_inst(10.0, 20.0);
+        printf("C: JITed func result: %f\n",res);
+
+        // return the result
+        ret = PyFloat_FromDouble(res);
+        if(PyErr_Occurred()) return NULL;
+        return ret;
+    }
+
+    static PyMethodDef methods[] = {
+        {"call_cfunc", call_cfunc, METH_VARARGS,
+        "Execute JITed function"},
+        {NULL, NULL, 0, NULL}        // sentinel
+    };
+
+    PyMODINIT_FUNC
+    initjit_cfuncs(void)
+    {
+        PyObject *m = NULL;
+        m = Py_InitModule("jit_cfuncs", methods);
+        if(!m) {printf("C: Could not initialize module!\n");}
+    }
+
+Compile and link with something like:
+
+.. code-block:: bash
+
+    $ gcc jit_cfuncs.c -fPIC -c -o jit_cfuncs.o 
+    $ gcc -shared -fPIC jit_cfuncs.o -o jit_cfuncs.so -lpython2.7
+
+Finally, create a Python function::
+
+    from numba import cfunc
+
+    # define some functions to cfunc
+    def add(a, b):
+        return a + b
+
+    def sub(a, b):
+        return a - b
+
+    # Create cfunc callbacks
+    sig = "float64(float64, float64)"
+    add_nb = cfunc(sig)(add)
+    sub_nb = cfunc(sig)(sub)
+
+    # demonstrate the callback via the ctypes object
+    print("Python: ctypes: %s" % add_nb.ctypes(5, 10))
+    print("Python: ctypes: %s" % sub_nb.ctypes(5, 10))
+
+    # import the extension module
+    import jit_cfuncs
+
+    # pass the cfunc address for use in a C function pointer
+    print("Python: cfunc result: %s" % jit_cfuncs.call_cfunc(add_nb.address))
+    print("Python: cfunc result: %s" % jit_cfuncs.call_cfunc(sub_nb.address))
+    
+Executing gives:
+
+.. code-block:: bash
+
+    $ python jit_cfuncs.py 
+    Python: ctypes: 15.0
+    Python: ctypes: -5.0
+    C: cfunc result: 30.000000
+    Python: cfunc result: 30.0
+    C: cfunc result: -10.000000
+    Python: cfunc result: -10.0
+
+
+
+
