@@ -228,7 +228,7 @@ class TestListComprehension(unittest.TestCase):
             msg = "Invalid usage of == with parameters"
             self.assertIn(msg, str(raises.exception))
 
-
+@unittest.skipIf(utils.PYVERSION < (3, 0), "needs Python 3")
 class TestArrayComprehension(unittest.TestCase):
 
     @tag('important')
