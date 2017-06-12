@@ -4,7 +4,6 @@ import math
 import re
 import sys
 import types as pytypes
-import dis
 
 import numpy as np
 
@@ -20,6 +19,7 @@ from numba.annotations import type_annotations
 from numba.ir_utils import copy_propagate, apply_copy_propagate, get_name_var_table, remove_dels, remove_dead
 from numba import ir
 from numba.compiler import compile_isolated, Flags
+from numba.bytecode import ByteCodeIter
 
 
 class TestParforsBase(unittest.TestCase):
@@ -60,11 +60,14 @@ class TestParforsBase(unittest.TestCase):
 
         return cfunc, cpfunc
 
-    def check_three_way(self, pyfunc, cfunc, cpfunc, *args, **kwargs):
+    def check_prange_vs_others(self, pyfunc, cfunc, cpfunc, *args, **kwargs):
         """
         Checks python, njit and parfor impls produce the same result.
 
         Arguments:
+            pyfunc - the python function to test
+            cfunc - CompilerResult from njit of pyfunc
+            cpfunc - CompilerResult from njit(parallel=True) of pyfunc
             args - arguments for the function being tested
             kwargs - to pass to np.testing.assert_almost_equal
                      'decimal' is supported.
@@ -143,7 +146,7 @@ class TestParfors(TestParforsBase):
 
     def check(self, pyfunc, *args, **kwargs):
         cfunc, cpfunc = self.compile_all(pyfunc, *args)
-        self.check_three_way(pyfunc, cfunc, cpfunc, *args, **kwargs)
+        self.check_prange_vs_others(pyfunc, cfunc, cpfunc, *args, **kwargs)
 
     def test_arraymap(self):
         def test_impl(a, x, y):
@@ -250,108 +253,108 @@ class TestParfors(TestParforsBase):
             parfor_pass.run()
             self.assertTrue(countParfors(test_ir) == 1)
 
-    def test_simple1(self):
+    def test_simple01(self):
         def test_impl():
             return np.ones(())
         with self.assertRaises(AssertionError) as raises:
             self.check(test_impl)
         self.assertIn("\'@do_scheduling\' not found", str(raises.exception))
 
-    def test_simple2(self):
+    def test_simple02(self):
         def test_impl():
             return np.ones((1,))
         self.check(test_impl)
 
-    def test_simple3(self):
+    def test_simple03(self):
         def test_impl():
             return np.ones((1, 2))
         self.check(test_impl)
 
-    def test_simple4(self):
+    def test_simple04(self):
         def test_impl():
             return np.ones(1)
         self.check(test_impl)
 
-    def test_simple5(self):
+    # TODO: Fails. List ctor needed or bug?
+    def test_simple05(self):
         def test_impl():
             return np.ones([1])
         self.check(test_impl)
 
-    #TODO: Fails
-    @unittest.skip('list comp ctor patch needed')
-    def test_simple5(self):
+    # TODO: Fails. list comp + ctor patch needed?
+    def test_simple06(self):
         def test_impl():
             return np.ones([x for x in range(3)])
         self.check(test_impl)
 
-    def test_simple6(self):
+    def test_simple07(self):
         def test_impl():
             return np.ones((1, 2), dtype=np.complex128)
         self.check(test_impl)
 
-    def test_simple7(self):
+    def test_simple08(self):
         def test_impl():
             return np.ones((1, 2)) + np.ones((1, 2))
         self.check(test_impl)
 
-    def test_simple8(self):
+    def test_simple09(self):
         def test_impl():
             return np.ones((1, 1))
         self.check(test_impl)
 
-    def test_simple9(self):
+    def test_simple10(self):
         def test_impl():
             return np.ones((0, 0))
         self.check(test_impl)
 
-    def test_simple10(self):
+    def test_simple11(self):
         def test_impl():
             return np.ones((10, 10)) + 1.
         self.check(test_impl)
 
-    def test_simple11(self):
+    def test_simple12(self):
         def test_impl():
             return np.ones((10, 10)) + np.complex128(1.)
         self.check(test_impl)
 
-    def test_simple12(self):
+    def test_simple13(self):
         def test_impl():
             return np.complex128(1.)
         with self.assertRaises(AssertionError) as raises:
             self.check(test_impl)
         self.assertIn("\'@do_scheduling\' not found", str(raises.exception))
 
-    def test_simple13(self):
+    def test_simple14(self):
         def test_impl():
             return np.ones((10, 10))[0::20]
         self.check(test_impl)
 
-    def test_simple14(self):
+    def test_simple15(self):
         def test_impl(v1, v2, m1, m2):
             return v1 + v1
         self.check(test_impl, *self.simple_args)
 
-    def test_simple15(self):
+    def test_simple16(self):
         def test_impl(v1, v2, m1, m2):
             return m1 + m1
         self.check(test_impl, *self.simple_args)
 
-    def test_simple16(self):
+    def test_simple17(self):
         def test_impl(v1, v2, m1, m2):
             return m2 + v1
         self.check(test_impl, *self.simple_args)
 
-    def test_simple17(self):
+    def test_simple18(self):
         def test_impl(v1, v2, m1, m2):
             return m1 + np.linalg.svd(m2)[0][:-1, :]
         self.check(test_impl, *self.simple_args)
 
-    def test_simple18(self):
+    def test_simple19(self):
         def test_impl(v1, v2, m1, m2):
             return np.dot(m1, v2)
         self.check(test_impl, *self.simple_args)
 
-    def test_simple19(self):
+    def test_simple20(self):
         def test_impl(v1, v2, m1, m2):
             return np.dot(m1, m2)
         # gemm is left to BLAS
@@ -359,18 +362,18 @@ class TestParfors(TestParforsBase):
             self.check(test_impl, *self.simple_args)
         self.assertIn("\'@do_scheduling\' not found", str(raises.exception))
 
-    #TODO: Fails
-    def test_simple20(self):
+    # TODO: Fails, dot() for a `v**T * v` doesn't go via parallel scheduler
+    def test_simple21(self):
         def test_impl(v1, v2, m1, m2):
             return np.dot(v1, v1)
         self.check(test_impl, *self.simple_args)
 
-    def test_simple21(self):
+    def test_simple22(self):
         def test_impl(v1, v2, m1, m2):
             return np.sum(v1 + v1)
         self.check(test_impl, *self.simple_args)
 
-    def test_simple22(self):
+    def test_simple23(self):
         def test_impl(v1, v2, m1, m2):
             x = 2 * v1
             y = 2 * v1
@@ -380,7 +383,7 @@ class TestParfors(TestParforsBase):
 
 class TestPrange(TestParforsBase):
 
-    def prange_tester(self, pyfunc, *args, patch_instance=None, **kwargs):
+    def prange_tester(self, pyfunc, *args, **kwargs):
         """
         The `prange` tester
         This is a hack. It basically switches out range calls for prange.
@@ -399,8 +402,14 @@ class TestPrange(TestParforsBase):
 
         Arguments:
          pyfunc - the python function to test
+         args - data arguments to pass to the pyfunc under test
+
+        Keyword Arguments:
          patch_instance - iterable containing which instances of `range` to
-                          replace.
+                          replace. If not present all instance of `range` are
+                          replaced.
+         Remaining kwargs are passed to np.testing.assert_almost_equal
+
 
         Example:
             def foo():
@@ -436,9 +445,11 @@ class TestPrange(TestParforsBase):
 
         prange_names = list(pyfunc_code.co_names)
 
-        if patch_instance is None:
+        patch_instance = kwargs.pop('patch_instance', None)
+        if not patch_instance:
             # patch all instances, cheat by just switching
             # range for prange
+            assert 'range' in pyfunc_code.co_names
             prange_names = tuple([x if x != 'range' else 'prange'
                                   for x in pyfunc_code.co_names])
             new_code = bytes(pyfunc_code.co_code)
@@ -448,10 +459,10 @@ class TestPrange(TestParforsBase):
             range_idx = pyfunc_code.co_names.index('range')
             range_locations = []
             # look for LOAD_GLOBALs that point to 'range'
-            for l, b in enumerate(pyfunc_code.co_code):
-                if b == dis.opmap['LOAD_GLOBAL']:
-                    if pyfunc_code.co_code[l + 1] == range_idx:
-                        range_locations.append(l + 1)
+            for _, instr in ByteCodeIter(pyfunc_code):
+                if instr.opname == 'LOAD_GLOBAL':
+                    if instr.arg == range_idx:
+                        range_locations.append(instr.offset + 1)
             # add in 'prange' ref
             prange_names.append('prange')
             prange_names = tuple(prange_names)
@@ -498,7 +509,7 @@ class TestPrange(TestParforsBase):
         cpfunc = self.compile_parallel(pfunc, sig)
 
         # compare
-        self.check_three_way(pyfunc, cfunc, cpfunc, *args, **kwargs)
+        self.check_prange_vs_others(pyfunc, cfunc, cpfunc, *args, **kwargs)
 
     def test_prange01(self):
         def test_impl():
@@ -581,6 +592,7 @@ class TestPrange(TestParforsBase):
 
         test_impl()
 
+    # TODO: fails, invalid result
     def test_prange09(self):
         def test_impl():
             n = 4
@@ -605,10 +617,13 @@ class TestPrange(TestParforsBase):
         # patch outer loop to 'prange'
         self.prange_tester(test_impl, patch_instance=[0])
 
-    #TODO: Fails
+    # TODO:
+    # Fails py 3+ with:
+    # List comprehension with a `prange` fails with
+    # `No definition for lowering <class 'numba.parfor.prange'>(int64,) -> range_state_int64`.
+    # Fails py 2.7 with:
+    # Junk result (Arrays not equal) or corruption/double free.
     def test_prange11(self):
-        # List comprehension with a `prange` fails with
-        # `No definition for lowering <class 'numba.parfor.prange'>(int64,) -> range_state_int64`.
         def test_impl():
             n = 4
             return [np.sin(j) for j in range(n)]
