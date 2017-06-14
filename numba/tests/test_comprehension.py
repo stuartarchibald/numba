@@ -222,7 +222,7 @@ class TestListComprehension(unittest.TestCase):
             with self.assertRaises(TypingError) as raises:
                 cfunc = jit(nopython=True)(list22)
                 cfunc(var)
-            msg = "cannot unify reflected list"
+            msg = "Invalid usage of == with parameters"
             self.assertIn(msg, str(raises.exception))
 
 class TestArrayComprehension(unittest.TestCase):
