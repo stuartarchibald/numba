@@ -189,11 +189,19 @@ def inline_closure_call(func_ir, glbls, block, i, callee, typingctx=None,
     # 4. replace freevar with actual closure var
     if callee_closure:
         closure = func_ir.get_definition(callee_closure)
-        assert(isinstance(closure, ir.Expr)
-               and closure.op == 'build_tuple')
-        assert(len(callee_code.co_freevars) == len(closure.items))
-        debug_print("callee's closure = ", closure)
-        _replace_freevars(callee_blocks, closure.items)
+        likelyiscell = isinstance(closure, tuple)
+        assert((isinstance(closure, ir.Expr) and
+                closure.op == 'build_tuple')
+                or
+               (likelyiscell and
+                hasattr(closure[0], 'cell_contents')))
+        if likelyiscell:
+            assert(len(callee_code.co_freevars) == len(closure))
+            _replace_freevars(callee_blocks, closure)
+        else:
+            assert(len(callee_code.co_freevars) == len(closure.items))
+            _replace_freevars(callee_blocks, closure.items)
+        debug_print("callee's closure = ", closure)  
         debug_print("After closure rename")
         _debug_dump(callee_ir)
 
@@ -283,7 +291,11 @@ def _replace_freevars(blocks, args):
             if isinstance(stmt.value, ir.FreeVar):
                 idx = stmt.value.index
                 assert(idx < len(args))
-                stmt.value = args[idx]
+                if hasattr(args[idx], 'cell_contents'): # cell
+                    stmt.value = ir.Const(args[idx].cell_contents,
+                                          stmt.loc.line)
+                else:
+                    stmt.value = args[idx]
 
 
 def _replace_returns(blocks, target, return_label):

@@ -15,12 +15,13 @@ https://github.com/IntelLabs/ParallelAccelerator.jl
 from __future__ import print_function, division, absolute_import
 import types as pytypes  # avoid confusion with numba.types
 import sys
+import numpy as np
 from functools import reduce
 from collections import defaultdict
 
 import numba
 from numba import ir, ir_utils, types, typing, rewrites, config, analysis
-from numba import array_analysis, postproc, typeinfer
+from numba import array_analysis, postproc, typeinfer, numpy_support
 from numba.typing.templates import infer_global, AbstractTemplate
 
 from numba.ir_utils import (
@@ -85,42 +86,69 @@ _reduction_ops = {
     'prod': ('*=', '*', 1),
 }
 
-def min_parallel_impl(in_arr):
-    A = in_arr.ravel()
-    val = numba.targets.builtins.get_type_max_value(A.dtype)
-    for i in numba.prange(len(A)):
-        val = min(val, A[i])
-    return val
+def _xinfo(nbtype, attr):
+    """
+    Returns an attr from np.{i,f}info for a given
+    Numba type as if it were a Numpy type.
+    """
+    nptype = numpy_support.as_dtype(nbtype)
+    if issubclass(nptype.type, np.inexact):
+        info = np.finfo(nptype)
+    elif issubclass(nptype.type, np.integer):
+        info = np.iinfo(nptype)
+    else:
+        raise ValueError("Unknown dtype %s" % nptype)
+    if hasattr(info, attr):
+        return nptype.type(getattr(info, attr))
+    else:
+        raise ValueError("Invalid attribute %s" % attr)
 
-def max_parallel_impl(in_arr):
-    A = in_arr.ravel()
-    val = numba.targets.builtins.get_type_min_value(A.dtype)
-    for i in numba.prange(len(A)):
-        val = max(val, A[i])
-    return val
+def _minmax_init_attr(func):
+    """
+    Returns the attr suitable for using as an initial value
+    for min/max computations
+    """
+    name = func.__name__
+    if name == 'min':
+        return 'max'
+    elif name == 'max':
+        return 'min'
+    else:
+        raise ValueError('Invalid function for min/max attr selection')
+    
+def _get_minmax_parallel_impl(func):
+    init_func = _minmax_init_attr(func)
+    def wrapper(in_arr):
+        ival = _xinfo(in_arr.dtype, init_func)
+        def impl(in_arr):
+            A = in_arr.ravel()
+            val = ival
+            for i in numba.prange(len(A)):
+                val = func(val, A[i])
+            return val
+        return impl
+    return wrapper
 
-def argmin_parallel_impl(in_arr):
-    A = in_arr.ravel()
-    init_val = numba.targets.builtins.get_type_max_value(A.dtype)
-    ival = numba.typing.builtins.IndexValue(0, init_val)
-    for i in numba.prange(len(A)):
-        curr_ival = numba.typing.builtins.IndexValue(i, A[i])
-        ival = min(ival, curr_ival)
-    return ival.index
+def _get_argminmax_parallel_impl(func):
+    init_func = _minmax_init_attr(func)
+    def wrapper(in_arr):
+        init_val = _xinfo(in_arr.dtype, init_func)
+        def impl(in_arr):
+            A = in_arr.ravel()
+            ival = numba.targets.builtins.IndexValue(0, init_val)
+            for i in numba.prange(len(A)):
+                curr_ival = numba.targets.builtins.IndexValue(i, A[i])
+                ival = func(ival, curr_ival)
+            return ival.index
+        return impl
+    return wrapper
 
-def argmax_parallel_impl(in_arr):
-    A = in_arr.ravel()
-    init_val = numba.targets.builtins.get_type_min_value(A.dtype)
-    ival = numba.typing.builtins.IndexValue(0, init_val)
-    for i in numba.prange(len(A)):
-        curr_ival = numba.typing.builtins.IndexValue(i, A[i])
-        ival = max(ival, curr_ival)
-    return ival.index
-
-replace_functions_map = {('argmin', 'numpy'): argmin_parallel_impl,
-                        ('argmax', 'numpy'): argmax_parallel_impl,
-                        ('min', 'numpy'): min_parallel_impl,
-                        ('max', 'numpy'): max_parallel_impl,}
+replace_functions_map = {('argmin', 'numpy'):
+                             _get_argminmax_parallel_impl(min),
+                        ('argmax', 'numpy'):
+                            _get_argminmax_parallel_impl(max),
+                        ('min', 'numpy'): _get_minmax_parallel_impl(min),
+                        ('max', 'numpy'): _get_minmax_parallel_impl(max),}
 
 class LoopNest(object):
 
@@ -300,7 +328,8 @@ class ParforPass(object):
                         func_def = guard(get_definition, self.func_ir, expr.func)
                         callname = guard(find_callname, self.func_ir, expr)
                         if callname in replace_functions_map:
-                            new_func = replace_functions_map[callname]
+                            new_func_typer = replace_functions_map[callname]
+                            new_func = new_func_typer(self.typemap[expr.args[0].name])
                             g = copy.copy(self.func_ir.func_id.func.__globals__)
                             g['numba'] = numba
                             # inline the parallel implementation
@@ -749,7 +778,6 @@ class ParforPass(object):
         return parfor
 
     def _reduction_to_parfor(self, equiv_set, lhs, expr):
-        from numba.targets.builtins import get_type_max_value, get_type_min_value
         call_name, mod_name = find_callname(self.func_ir, expr)
         args = expr.args
 

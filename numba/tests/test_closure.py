@@ -200,6 +200,7 @@ class TestInlinedClosure(TestCase):
         cfunc = njit(outer)
         self.assertEqual(cfunc(10), outer(10))
 
+        
     @tag('important')
     def test_bulk_use_cases(self):
         """ Tests the large number of use cases defined below """

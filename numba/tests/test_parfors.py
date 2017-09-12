@@ -585,6 +585,7 @@ class TestParfors(TestParforsBase):
         self.check(test_impl2, B)
         self.check(test_impl2, C)
 
+
 class TestPrange(TestParforsBase):
 
     def prange_tester(self, pyfunc, *args, **kwargs):
