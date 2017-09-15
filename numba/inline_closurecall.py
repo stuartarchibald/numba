@@ -22,7 +22,6 @@ from numba.ir_utils import (
 from numba.analysis import compute_cfg_from_blocks
 from numba.targets.rangeobj import range_iter_len
 from numba.unsafe.ndarray import empty_inferred as unsafe_empty_inferred
-from numba.stencil import StencilFunc
 import numpy as np
 
 """
@@ -91,6 +90,7 @@ class InlineClosureCallPass(object):
                             break
                         # check for stencil call
                         if guard(find_callname, self.func_ir, expr) == ('stencil', 'numba'):
+                            from numba.stencil import StencilFunc
                             assert len(expr.args) == 1, """stencil call with one
                                                             arg expected"""
                             stencil_def = guard(get_definition, self.func_ir,expr.args[0])
