@@ -13,6 +13,8 @@ import operator
 from dis import dis
 import types as pytypes
 import itertools
+from contextlib import contextmanager
+from copy import deepcopy
 
 import numba
 from numba import unittest_support as unittest
@@ -20,6 +22,7 @@ from numba import njit, stencil, types
 from numba.compiler import compile_extra, Flags
 from numba.targets import registry
 from .support import tag
+from numba.errors import LoweringError, TypingError
 
 
 # for decorating tests, marking that Windows with Python 2.7 is not supported
@@ -425,7 +428,7 @@ class pyStencilGenerator:
         ids = 'ijklmno'  # 7 is enough for fortran
         # builder functions
 
-        def genalloc_return(self, orig, var, init_val=0):
+        def genalloc_return(self, orig, var, dtype_var, init_val=0):
             new = ast.Assign(
                 targets=[
                     ast.Name(
@@ -444,7 +447,8 @@ class pyStencilGenerator:
                                 id=orig,
                                 ctx=ast.Load()),
                             attr='shape',
-                            ctx=ast.Load())],
+                            ctx=ast.Load()),
+                            self.genCall('type', [dtype_var.id]).value],
                     keywords=[],
                     starargs=None,
                     kwargs=None), right=self.genNum(init_val)))
@@ -505,7 +509,7 @@ class pyStencilGenerator:
             return ss
 
         def genNum(self, value):
-            if value >= 0:
+            if abs(value) >= 0:
                 return ast.Num(value)
             else:
                 return ast.UnaryOp(ast.USub(), ast.Num(-value))
@@ -551,7 +555,7 @@ class pyStencilGenerator:
         """ Fixes the relative indexes to be written in as induction index + relative index
         """
 
-        def __init__(self, argnames, *args, **kwargs):
+        def __init__(self, argnames, standard_indexing, *args, **kwargs):
             super(ast.NodeTransformer, self).__init__(*args, **kwargs)
             self.argnames = argnames
             self.idx_len = -1
@@ -559,10 +563,12 @@ class pyStencilGenerator:
             self.maxes = None
             self.imin = np.iinfo(int).min
             self.imax = np.iinfo(int).max
+            self.standard_indexing = standard_indexing if standard_indexing else []
 
         def visit_Subscript(self, node):
             node = self.generic_visit(node)
-            if node.value.id in self.argnames:
+
+            if (node.value.id in self.argnames) and (node.value.id not in self.standard_indexing):
                 if isinstance(node.slice.value, ast.Tuple):
                     idx = []
                     for x, val in enumerate(node.slice.value.elts):
@@ -581,7 +587,10 @@ class pyStencilGenerator:
                         if(self.idx_len != len(idx)):
                             raise ValueError(
                                 "Relative indexing mismatch detected")
-                    context = ast.Store() if isinstance(node.ctx, ast.Store) else ast.Load()
+                    if isinstance(node.ctx, ast.Store):
+                        msg = "Assignments to array passed to stencil kernels is not allowed"
+                        raise ValueError(msg)
+                    context = ast.Load()
                     newnode = ast.Subscript(
                         value=node.value,
                         slice=ast.Index(
@@ -607,17 +616,19 @@ class pyStencilGenerator:
                         else:
                             raise ValueError("Unknown indexing operation")
 
-                    for x, node in enumerate(node.slice.value.elts):
-                        relvalue = getval(node)
+                    for x, lnode in enumerate(node.slice.value.elts):
+                        relvalue = getval(lnode)
                         if relvalue < self.mins[x]:
                             self.mins[x] = relvalue
                         if relvalue > self.maxes[x]:
                             self.maxes[x] = relvalue
                     return newnode
+            else:
+                return node
 
         def get_idx_len(self):
             if self.idx_len == -1:
-                raise RuntimeError(
+                raise ValueError(
                     'Transform has not been run/no indexes found')
             else:
                 return self.idx_len
@@ -631,10 +642,14 @@ class pyStencilGenerator:
          * Function definition as an entry point
         """
 
-        def __init__(self, loop_data, argnames, cval, *args, **kwargs):
+        def __init__(self, original_kernel, loop_data, argnames, retty, cval, standard_indexing, *args, **kwargs):
             super(ast.NodeTransformer, self).__init__(*args, **kwargs)
+            self.original_kernel = original_kernel
             self.loop_data = loop_data
             self.argnames = argnames
+            self.retty = retty
+            self.standard_indexing = standard_indexing if standard_indexing else []
+            self.relidx_args = [x for x in self.argnames if x not in self.standard_indexing]
             # switch cval to python type
             if hasattr(cval, 'dtype'):
                 self.cval = cval.tolist()
@@ -652,17 +667,19 @@ class pyStencilGenerator:
             # this function validates arguments and is injected into the top
             # of the stencil call
             def check_stencil_arrays(*args):
+                # the first has to be an array due to parfors requirements
                 init_shape = args[0].shape
                 for x in args[1:]:
-                    if init_shape != x.shape:
-                        raise ValueError("Input stencil arrays do not commute")
+                    if hasattr(x, 'shape'):
+                        if init_shape != x.shape:
+                            raise ValueError("Input stencil arrays do not commute")
 
             checksrc = inspect.getsource(check_stencil_arrays)
             check_impl = ast.parse(
                 checksrc.strip()).body[0]  # don't need module
             ast.fix_missing_locations(check_impl)
 
-            checker_call = self.genCall('check_stencil_arrays', self.argnames)
+            checker_call = self.genCall('check_stencil_arrays', self.relidx_args)           
 
             blk = []
             for b in node.body:
@@ -718,8 +735,9 @@ class pyStencilGenerator:
                     '__%s' % self.ids[nloops - l - 1],
                     minbound, maxbound, body=[loops])
             ast.copy_location(loops, node)
+            rettyname = self.retty.targets[0]
             allocate = self.genalloc_return(
-                self.stencil_arr, retvar, self.cval)
+                self.stencil_arr, retvar, rettyname, self.cval)
             ast.copy_location(allocate, node)
             returner = self.genreturn(retvar)
             ast.copy_location(returner, node)
@@ -730,6 +748,8 @@ class pyStencilGenerator:
                 body=[
                     check_impl,
                     checker_call,
+                    self.original_kernel,
+                    self.retty,
                     allocate,
                     loops,
                     returner],
@@ -737,19 +757,29 @@ class pyStencilGenerator:
             ast.copy_location(new, node)
             return new
 
-    class GetArgNames(ast.NodeVisitor):
+    class GetArgNames(ast.NodeVisitor, Builder):
         """ Gets the argument names """
 
         def __init__(self, *args, **kwargs):
             super(ast.NodeVisitor, self).__init__(*args, **kwargs)
             self._argnames = None
             self._kwargnames = None
-
+            self.retty = None
+            self.original_kernel = None
+            
         def visit_FunctionDef(self, node):
+            if self._argnames is not None or self._kwargnames is not None:
+                raise RuntimeError("multiple definition of function/args?")
             self._argnames = [x.arg for x in node.args.args]
             if node.args.kwarg:
                 self._kwargnames = [x.arg for x in node.args.kwarg]
+            compute_retdtype = self.genCall(node.name, self._argnames)
+            self.retty = ast.Assign(targets=[ast.Name(
+            id='__retdtype',
+            ctx=ast.Store())], value=compute_retdtype.value)
+            self.original_kernel = ast.fix_missing_locations(deepcopy(node))
             self.generic_visit(node)
+            
 
         def get_arg_names(self):
             return self._argnames
@@ -768,13 +798,14 @@ class pyStencilGenerator:
                 kwargs=None)
             return new
 
-    def generate_stencil_tree(self, func, cval):
+    def generate_stencil_tree(self, func, cval, standard_indexing):
         """
         Generates the AST tree for a stencil based on func and cval.
         """
         src = inspect.getsource(func)
         tree = ast.parse(src.strip())
 
+        DEBUG = True
         DEBUG = False
         if DEBUG:
             print("ORIGINAL")
@@ -786,21 +817,30 @@ class pyStencilGenerator:
             argnamegetter = self.GetArgNames()
             argnamegetter.visit(tree)
             argnm = argnamegetter.get_arg_names()
+            if standard_indexing:
+                for x in standard_indexing:
+                    if x not in argnm:
+                        raise ValueError("Non-existent variable specified in standard_indexing")
+
+            # return type computation
+            # gets an ast to generate a return type
+            retty = argnamegetter.retty
+            original_kernel = argnamegetter.original_kernel
 
             # fold consts
             fold_const = self.FoldConst()
             fold_const.visit(tree)
 
             # rewrite the relative indices as induced indices
-            relidx_fixer = self.FixRelIndex(argnm)
+            relidx_fixer = self.FixRelIndex(argnm, standard_indexing)
             relidx_fixer.visit(tree)
             index_len = relidx_fixer.get_idx_len()
 
             # generate the function body and loop nests and assemble
-            fixer = self.FixFunc(
+            fixer = self.FixFunc(original_kernel,
                 {'number': index_len, 'maxes': relidx_fixer.maxes,
                  'mins': relidx_fixer.mins},
-                argnm, cval)
+                argnm, retty, cval, standard_indexing)
             fixer.visit(tree)
 
             # fix up the call sites so they work better with astor
@@ -845,9 +885,10 @@ def pyStencil(func_or_mode='constant', **options):
         raise ValueError("Unsupported mode style " + mode)
 
     cval = options.get('cval', 0)
+    standard_indexing = options.get('standard_indexing', None)
 
     # generate a new AST tree from the kernel func
-    tree = pyStencilGenerator().generate_stencil_tree(func, cval)
+    tree = pyStencilGenerator().generate_stencil_tree(func, cval, standard_indexing)
 
     # breathe life into the tree
     mod_code = compile(tree, filename="<ast>", mode="exec")
@@ -859,7 +900,7 @@ def pyStencil(func_or_mode='constant', **options):
 
 class TestManyStencils(TestStencilBase):
 
-    def check(self, pyfunc, *args, options={}, **kwargs):
+    def check(self, pyfunc, *args, options={}, expected_exception=None, **kwargs):
         """
         For a given kernel:
 
@@ -874,12 +915,67 @@ class TestManyStencils(TestStencilBase):
         """
 
         # DEBUG print output arrays
+        DEBUG_OUTPUT = True
         DEBUG_OUTPUT = False
+        
+        # collect fails
+        should_fail=[]
+        should_not_fail=[]
+        
+        # runner that handles fails
+        @contextmanager
+        def errorhandler(exty = None, usecase=None):
+            try:
+                yield
+            except Exception as e:
+                if exty is not None:
+                    lexty = exty if hasattr(exty, '__iter__') else [exty,]
+                    found = False
+                    for ex in lexty:
+                        found |= isinstance(e, ex)
+                    if not found:
+                        raise
+                else:
+                    should_not_fail.append((usecase, e))
+            else:
+                if exty is not None:
+                    should_fail.append(usecase)
+
+        if isinstance(expected_exception, dict):
+            pystencil_ex = expected_exception['pyStencil']
+            stencil_ex = expected_exception['stencil']
+            njit_ex = expected_exception['njit']
+            parfor_ex = expected_exception['parfor']
+        else:
+            pystencil_ex = expected_exception
+            stencil_ex = expected_exception
+            njit_ex = expected_exception
+            parfor_ex = expected_exception
+            
 
         stencil_args = {'func_or_mode': pyfunc, **options}
 
-        # stencil impl
-        stencil_func_impl = stencil(**stencil_args)
+        expected_present = True
+        # try running the pyStencil version, if it raises then run the
+        # 
+        try: 
+            # ast impl
+            ast_impl = pyStencil(func_or_mode=pyfunc, **options)
+            expected = ast_impl(*args)
+            if DEBUG_OUTPUT:
+                print("\nExpected:\n", expected)
+        except Exception as ex:
+            # check exception is expected
+            with errorhandler(pystencil_ex, "pyStencil"):
+                raise ex
+            pyStencil_unhandled_ex = ex
+            expected_present = False
+
+        stencilfunc_output = None
+        with errorhandler(stencil_ex, "@stencil"):
+            stencil_func_impl = stencil(**stencil_args)
+            # stencil result
+            stencilfunc_output = stencil_func_impl(*args)
 
         # wrapped stencil impl, could this be generated?
         if len(args) == 1:
@@ -896,63 +992,91 @@ class TestManyStencils(TestStencilBase):
                 "Up to 3 arguments can be provided, found %s" %
                 len(args))
 
-        expected_present = True
-        try:
-            # ast impl
-            ast_impl = pyStencil(func_or_mode=pyfunc, **options)
-            expected = ast_impl(*args)
-            if DEBUG_OUTPUT:
-                print("\nExpected:\n", expected)
-        except Exception as ex:
-            print(ex)
-            expected_present = False
 
-        # overload check
-        wrapped_cfunc, wrapped_cpfunc = self.compile_all(wrap_stencil, *args)
-
-        # njit result
-        njit_output = wrapped_cfunc.entry_point(*args)
-
-        # parfor result
-        parfor_output = wrapped_cpfunc.entry_point(*args)
-
-        # stencil output
-        stencilfunc_output = stencil_func_impl(*args)
-
+        sig = tuple([numba.typeof(x) for x in args])
+        
+        njit_output = None
+        with errorhandler(njit_ex, "njit"):
+            wrapped_cfunc = self.compile_njit(wrap_stencil, sig)
+            # njit result
+            njit_output = wrapped_cfunc.entry_point(*args)
+            
+        parfor_output = None
+        with errorhandler(parfor_ex, "parfors"):
+            wrapped_cpfunc = self.compile_parallel(wrap_stencil, sig)
+            # parfor result
+            parfor_output = wrapped_cpfunc.entry_point(*args)
+            
         if DEBUG_OUTPUT:
+            print("\n@stencil_output:\n", stencilfunc_output)
             print("\nnjit_output:\n", njit_output)
             print("\nparfor_output:\n", parfor_output)
 
+
         if expected_present:
             try:
-                np.testing.assert_almost_equal(
-                    stencilfunc_output, expected, decimal=1)
-                self.assertEqual(expected.dtype, stencilfunc_output.dtype)
+                if not stencil_ex:
+                    np.testing.assert_almost_equal(
+                        stencilfunc_output, expected, decimal=1)
+                    self.assertEqual(expected.dtype, stencilfunc_output.dtype)
             except Exception as e:
+                should_not_fail.append(('@stencil', e))
                 print("@stencil failed: %s" % str(e))
 
             try:
-                np.testing.assert_almost_equal(
-                    njit_output, expected, decimal=1)
-                self.assertEqual(expected.dtype, njit_output.dtype)
+                if not njit_ex:
+                    np.testing.assert_almost_equal(
+                        njit_output, expected, decimal=1)
+                    self.assertEqual(expected.dtype, njit_output.dtype)
             except Exception as e:
+                should_not_fail.append(('njit', e))
                 print("@njit failed: %s" % str(e))
 
             try:
-                np.testing.assert_almost_equal(
-                    parfor_output, expected, decimal=1)
-                self.assertEqual(expected.dtype, parfor_output.dtype)
-                self.assertIn(
-                    '@do_scheduling',
-                    wrapped_cpfunc.library.get_llvm_str())
+                if not parfor_ex:
+                    np.testing.assert_almost_equal(
+                        parfor_output, expected, decimal=1)
+                    self.assertEqual(expected.dtype, parfor_output.dtype)
+                    try:
+                        self.assertIn(
+                            '@do_scheduling',
+                            wrapped_cpfunc.library.get_llvm_str())
+                    except AssertionError:
+                        msg = 'Could not find `@do_scheduling` in LLVM IR'
+                        raise AssertionError(msg)
             except Exception as e:
+                should_not_fail.append(('parfors', e))
                 print("@njit(parallel=True) failed: %s" % str(e))
 
-        if not expected_present:
-            print("pyStencil failed")
 
         if DEBUG_OUTPUT:
             print("\n\n")
+            
+        if should_fail:
+            msg = ["%s" % x for x in should_fail]
+            raise RuntimeError("The following implementations should have raised an exception but did not:\n%s" % msg )
+
+        if should_not_fail:
+            impls = ["%s" % x[0] for x in should_not_fail]
+            errs = ''.join(["%s: Message: %s\n\n" % x for x in should_not_fail])
+            str1 = "The following implementations should not have raised an exception but did:\n%s\n" % impls
+            str2 = "Errors were:\n\n %s " % errs
+            raise RuntimeError( str1 + str2 )
+
+        if not expected_present:
+            if expected_exception is None:
+                raise RuntimeError("pyStencil failed, was not caught/expected", pyStencil_unhandled_ex)
+                
+
+    def exception_dict(self, **kwargs):
+        d = dict()
+        d['pyStencil'] = None
+        d['stencil'] = None
+        d['njit'] = None
+        d['parfor'] = None
+        for k, v in kwargs.items():
+            d[k] = v
+        return d
 
     @skip_unsupported
     @tag('important')
@@ -1068,14 +1192,21 @@ class TestManyStencils(TestStencilBase):
             return a[-1, -1] + a[1, 1]
         self.check(kernel, a)
 
-    # Valid fail ?
-    # Cannot resolve setitem: array(float64, 2d, C)[(int64 x 2)] = complex128
     def test_basic14(self):
         """rel index add domain change const"""
         a = np.arange(12).reshape(3, 4)
 
         def kernel(a):
             return a[0, 0] + 1j
+        self.check(kernel, a)
+
+    def test_basic14b(self):
+        """rel index add domain change const"""
+        a = np.arange(12).reshape(3, 4)
+
+        def kernel(a):
+            t = 1.j
+            return a[0, 0] + t
         self.check(kernel, a)
 
     def test_basic15(self):
@@ -1086,6 +1217,7 @@ class TestManyStencils(TestStencilBase):
             return a[0, 0] + a[1, 0] + 1.
         self.check(kernel, a)
 
+    # FIXME: pyStencil fails, IndexError
     def test_basic16(self):
         """two rel index OOB, add const"""
         a = np.arange(12).reshape(3, 4)
@@ -1151,10 +1283,8 @@ class TestManyStencils(TestStencilBase):
             return a[1 + 0, 0] + a[0, 0] + x
         self.check(kernel, a)
 
-    # Should DCE have an impact or not? 'x' is not used but the relative
-    # addressing in the assignment of 'x' impacts the domain of application
     def test_basic23a(self):
-        """rel idx, work in body"""
+        """rel idx, dead code should not impact rel idx"""
         a = np.arange(12.).reshape(3, 4)
 
         def kernel(a):
@@ -1162,16 +1292,13 @@ class TestManyStencils(TestStencilBase):
             return a[1 + 0, 0] + a[0, 0]
         self.check(kernel, a)
 
-    # Should this work at all? does it make sense?
-    # At present TypeError appears:
-    # "numba.errors.InternalError: Buffer dtype cannot be buffer"
     def test_basic24(self):
         """1d idx on 2d arr"""
         a = np.arange(12).reshape(3, 4)
 
         def kernel(a):
             return a[0] + 1.
-        self.check(kernel, a)
+        self.check(kernel, a, expected_exception=[ValueError, TypingError])
 
     # Should this work at all? does it make sense?
     # pyStencil raises as there's no rel indices
@@ -1181,9 +1308,8 @@ class TestManyStencils(TestStencilBase):
 
         def kernel(a):
             return 1.
-        self.check(kernel, a)
+        self.check(kernel, a, expected_exception=[ValueError])
 
-    # parfors produces different result to njit
     def test_basic26(self):
         """3d arr"""
         a = np.arange(64).reshape(4, 8, 2)
@@ -1192,7 +1318,6 @@ class TestManyStencils(TestStencilBase):
             return a[0, 0, 0] - a[0, 1, 0] + 1.
         self.check(kernel, a)
 
-    # parfors produces different result to njit
     def test_basic27(self):
         """4d arr"""
         a = np.arange(128).reshape(4, 8, 2, 2)
@@ -1209,14 +1334,13 @@ class TestManyStencils(TestStencilBase):
             return a[0, 0] + np.float64(10.)
         self.check(kernel, a)
 
-    # valid fail, error message could do with improvement
     def test_basic29(self):
         """const index from func """
         a = np.arange(12.).reshape(3, 4)
 
         def kernel(a):
             return a[0, int(np.cos(0))]
-        self.check(kernel, a)
+        self.check(kernel, a, expected_exception=[ValueError, LoweringError])
 
     def test_basic30(self):
         """signed zeros"""
@@ -1226,8 +1350,7 @@ class TestManyStencils(TestStencilBase):
             return a[-0, -0]
         self.check(kernel, a)
 
-    # this fails, it is probably a valid fail, but does it need to be?
-    # could that `t` is a const be propagated?
+    # this passes parfors, fails in pyStencil
     def test_basic31(self):
         """does a const propagate?"""
         a = np.arange(12.).reshape(3, 4)
@@ -1236,16 +1359,26 @@ class TestManyStencils(TestStencilBase):
             t = 1
             return a[t, 0]
         self.check(kernel, a)
+        
+    # this fails all, need to decide whether to entirely support const prop + fold
+    # or not.
+    def test_basic31b(self):
+        """does a const propagate?"""
+        a = np.arange(12.).reshape(3, 4)
 
-    # this fails, but probably shouldn't? relative indexes need to be int-like
-    # but not necessarily int?
+        def kernel(a):
+            s = 1
+            t = 1 - s
+            return a[t, 0]
+        self.check(kernel, a)
+
     def test_basic32(self):
         """typed int index"""
         a = np.arange(12.).reshape(3, 4)
 
         def kernel(a):
             return a[np.int8(1), 0]
-        self.check(kernel, a)
+        self.check(kernel, a, expected_exception=[ValueError, LoweringError])
 
     def test_basic33(self):
         """add 0d array"""
@@ -1263,13 +1396,15 @@ class TestManyStencils(TestStencilBase):
         a = np.arange(144).reshape(12, 12)
         self.check(kernel, a)
 
-    # fails, trivial coercion fails, think this is expected
+    # parfors ought to raise but does not, is this likely down to the allocation of the
+    # return array under parfors being a different type?
     def test_basic35(self):
         """simple cval """
         def kernel(a):
             return a[0, 1]
         a = np.arange(12.).reshape(3, 4)
-        self.check(kernel, a, options={'cval': 5})
+        ex = self.exception_dict(stencil=ValueError, parfor=LoweringError, njit=LoweringError)
+        self.check(kernel, a, options={'cval': 5}, expected_exception=ex)
 
     def test_basic36(self):
         """more complex with cval"""
@@ -1285,13 +1420,14 @@ class TestManyStencils(TestStencilBase):
         a = np.arange(12.).reshape(3, 4)
         self.check(kernel, a, options={'cval': 5 + 63.})
 
-    # fails with "can't covert complex to float"
+    # pyStencil handles the type change, the others raise
     def test_basic38(self):
         """cval is complex"""
         def kernel(a):
             return a[0, 1] + a[0, -1] + a[1, -1] + a[1, -1]
         a = np.arange(12.).reshape(3, 4)
-        self.check(kernel, a, options={'cval': 1.j})
+        ex = self.exception_dict(stencil=ValueError, parfor=TypeError, njit=LoweringError)
+        self.check(kernel, a, options={'cval': 1.j}, expected_exception=ex)
 
     def test_basic39(self):
         """cval is func expr"""
@@ -1315,7 +1451,7 @@ class TestManyStencils(TestStencilBase):
             return a[0, 1] + b[0, -2]
         a = np.arange(12.).reshape(3, 4)
         b = np.arange(1.).reshape(1, 1)
-        self.check(kernel, a, b)
+        self.check(kernel, a, b, expected_exception=ValueError)
 
     # This fails pyStencil but stencil func runs, fairly sure it shouldn't?
     def test_basic42(self):
@@ -1324,7 +1460,7 @@ class TestManyStencils(TestStencilBase):
             return a[0, 1] + b[0, -2]
         a = np.arange(12.).reshape(3, 4)
         b = np.arange(9.).reshape(3, 3)
-        self.check(kernel, a, b)
+        self.check(kernel, a, b, expected_exception=[ValueError, LoweringError])
 
     def test_basic43(self):
         """2 args more complexity"""
@@ -1342,7 +1478,7 @@ class TestManyStencils(TestStencilBase):
             return a[0, 1]
         a = np.arange(12.).reshape(3, 4)
         b = np.arange(12.).reshape(3, 4)
-        self.check(kernel, a, b)
+        self.check(kernel, a, b, expected_exception=[ValueError, LoweringError])
 
     # doesn't match pyStencil, probably expected
     def test_basic45(self):
@@ -1352,7 +1488,7 @@ class TestManyStencils(TestStencilBase):
             return a[0, 1] + a[1, 0]
         a = np.arange(12.).reshape(3, 4)
         b = np.arange(12.).reshape(3, 4)
-        self.check(kernel, a, b)
+        self.check(kernel, a, b, expected_exception=[ValueError, LoweringError])
 
     # doesn't match pyStencil, probably expected
     def test_basic46(self):
@@ -1362,7 +1498,7 @@ class TestManyStencils(TestStencilBase):
             return a[0, 1] + a[1, 0]
         a = np.arange(12.).reshape(3, 4)
         b = np.arange(12.).reshape(3, 4)
-        self.check(kernel, a, b)
+        self.check(kernel, a, b, expected_exception=[ValueError, LoweringError])
 
     def test_basic47(self):
         """3 args"""
@@ -1373,8 +1509,170 @@ class TestManyStencils(TestStencilBase):
         c = np.arange(12.).reshape(3, 4)
         self.check(kernel, a, b, c)
 
-    # TODO: standard_indexing and neighbourhood
+    # matches pyStencil, but all ought to fail
+    # probably hard to detect?
+    def test_basic48(self):
+        """2 args, has assignment before use via memory alias"""
+        def kernel(a):
+            c = a.T
+            c[:, :] = 10
+            return a[0, 1]
+        a = np.arange(12.).reshape(3, 4)
+        self.check(kernel, a)
 
+
+    def test_basic49(self):
+        """2 args, standard_indexing on second"""
+        def kernel(a, b):
+            return a[0, 1] + b[0, 3]
+        a = np.arange(12.).reshape(3, 4)
+        b = np.arange(12.).reshape(3, 4)
+        self.check(kernel, a, b, options={'standard_indexing': 'b'})
+
+    # this should raise as b[0, 15] is out of bounds for 'b' under standard_indexing
+    def test_basic50(self):
+        """2 args, standard_indexing OOB"""
+        def kernel(a, b):
+            return a[0, 1] + b[0, 15]
+        a = np.arange(12.).reshape(3, 4)
+        b = np.arange(12.).reshape(3, 4)
+        self.check(kernel, a, b, options={'standard_indexing': 'b'}, expected_exception=IndexError)
+
+    # not sure this makes sense, what size array should be returned when both args are labelled as
+    # operating under standard_indexing? It probably ought to raise
+    def test_basic51(self):
+        """2 args, standard_indexing, no relidx"""
+        def kernel(a, b):
+            return a[0, 1] + b[0, 2]
+        a = np.arange(12.).reshape(3, 4)
+        b = np.arange(12.).reshape(3, 4)
+        self.check(kernel, a, b, options={'standard_indexing': ['a', 'b']}, expected_exception=ValueError)
+
+    def test_basic52(self):
+        """3 args, standard_indexing on middle arg """
+        def kernel(a, b, c):
+            return a[0, 1] + b[0, 1] + c[1, 2]
+        a = np.arange(12.).reshape(3, 4)
+        b = np.arange(4.).reshape(2, 2)
+        c = np.arange(12.).reshape(3, 4)
+        self.check(kernel, a, b, c, options={'standard_indexing': 'b'})
+
+    # this should fail parfors with a more informative error message
+    # @stencil and @njit do not raise but they should
+    def test_basic53(self):
+        """2 args, standard_indexing on variable that does not exist"""
+        def kernel(a, b):
+            return a[0, 1] + b[0, 2]
+        a = np.arange(12.).reshape(3, 4)
+        b = np.arange(12.).reshape(3, 4)
+        ex = self.exception_dict(pyStencil=ValueError, stencil=Exception, parfor=KeyError, njit=Exception)
+        self.check(kernel, a, b, options={'standard_indexing': 'c'}, expected_exception=ex)
+
+    def test_basic54(self):
+        """2 args, standard_indexing, index from var"""
+        def kernel(a, b):
+            t = 2
+            return a[0, 1] + b[0, t]
+        a = np.arange(12.).reshape(3, 4)
+        b = np.arange(12.).reshape(3, 4)
+        self.check(kernel, a, b, options={'standard_indexing': 'b'})
+        
+    def test_basic55(self):
+        """2 args, standard_indexing, index from more complex var"""
+        def kernel(a, b):
+            s = 1
+            t = 2 - s
+            return a[0, 1] + b[0, t]
+        a = np.arange(12.).reshape(3, 4)
+        b = np.arange(12.).reshape(3, 4)
+        self.check(kernel, a, b, options={'standard_indexing': 'b'})
+        
+    def test_basic56(self):
+        """2 args, standard_indexing, added complexity """
+        def kernel(a, b):
+            s = 1
+            acc = 0 
+            for k in b[0, :]:
+                acc += k
+            t = 2 - s - 1
+            return a[0, 1] + b[0, t] + acc
+        a = np.arange(12.).reshape(3, 4)
+        b = np.arange(12.).reshape(3, 4)
+        self.check(kernel, a, b, options={'standard_indexing': 'b'})
+        
+    def test_basic57(self):
+        """2 args, standard_indexing, split index operation """
+        def kernel(a, b):
+            c = b[0]
+            return a[0, 1] + c[1]
+        a = np.arange(12.).reshape(3, 4)
+        b = np.arange(12.).reshape(3, 4)
+        self.check(kernel, a, b, options={'standard_indexing': 'b'})
+
+    # parfors fails
+    def test_basic58(self):
+        """2 args, standard_indexing, split index with broadcast mutation """
+        def kernel(a, b):
+            c = b[0] + 1
+            return a[0, 1] + c[1]
+        a = np.arange(12.).reshape(3, 4)
+        b = np.arange(12.).reshape(3, 4)
+        self.check(kernel, a, b, options={'standard_indexing': 'b'})
+
+    def test_basic59(self):
+        """3 args, mix of array, relative and standard indexing and const"""
+        def kernel(a, b, c):
+            return a[0, 1] + b[1, 1] + c
+        a = np.arange(12.).reshape(3, 4)
+        b = np.arange(12.).reshape(3, 4)
+        c = 10
+        self.check(kernel, a, b, c, options={'standard_indexing': ['b', 'c']})
+
+    # parfors fails
+    def test_basic60(self):
+        """3 args, mix of array, relative and standard indexing, tuple pass through"""
+        def kernel(a, b, c):
+            return a[0, 1] + b[1, 1] + c[0]
+        a = np.arange(12.).reshape(3, 4)
+        b = np.arange(12.).reshape(3, 4)
+        c = (10,)
+        self.check(kernel, a, b, c, options={'standard_indexing': ['b', 'c']})
+
+    def test_basic61(self):
+        """2 args, standard_indexing on first"""
+        def kernel(a, b):
+            return a[0, 1] + b[1, 1]
+        a = np.arange(12.).reshape(3, 4)
+        b = np.arange(12.).reshape(3, 4)
+        self.check(kernel, a, b, options={'standard_indexing': 'a'})
+
+    def test_basic62(self):
+        """2 args, standard_indexing and cval"""
+        def kernel(a, b):
+            return a[0, 1] + b[1, 1]
+        a = np.arange(12.).reshape(3, 4)
+        b = np.arange(12.).reshape(3, 4)
+        self.check(kernel, a, b, options={'standard_indexing': 'b', 'cval': 10.})
+
+    def test_basic63(self):
+        """2 args, standard_indexing applied to relative, should fail, non-const idx"""
+        def kernel(a, b):
+            return a[0, b[0, 1]]
+        a = np.arange(12.).reshape(3, 4)
+        b = np.arange(12).reshape(3, 4)
+        ex = self.exception_dict(pyStencil=ValueError, stencil=ValueError, parfor=ValueError, njit=LoweringError)
+        self.check(kernel, a, b, options={'standard_indexing': 'b'}, expected_exception=ex)
+        
+    # stencil, njit, parfors all fail. Does this make sense?
+    def test_basic64(self):
+        """1 arg that uses standard_indexing"""
+        def kernel(a):
+            return a[0, 0]
+        a = np.arange(12.).reshape(3, 4)
+        self.check(kernel, a, options={'standard_indexing': 'a'}, expected_exception=ValueError)
+
+
+    # TODO: neighbourhood
 
 if __name__ == "__main__":
     unittest.main()
