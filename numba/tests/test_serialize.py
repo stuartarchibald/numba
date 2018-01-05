@@ -7,9 +7,10 @@ import subprocess
 import sys
 
 from numba import unittest_support as unittest
+from numba import decorators
 from numba.errors import TypingError
 from numba.targets import registry
-from .support import TestCase, tag
+from .support import TestCase, tag, override_env_config
 from .serialize_usecases import *
 
 
@@ -171,6 +172,26 @@ class TestDispatcherPickling(TestCase):
         self.assertEqual(f(2, 3), 12)
         g.disable_compile()
         self.assertEqual(g(2, 4), 13)
+        
+    @tag('important')
+    def test_disabled_jit(self):
+        """
+        Check that a _DisableJitWrapper instance can be {,de}serialized
+        as found in the case of envvar NUMBA_DISABLE_JIT being set.
+        """
+        with override_env_config('NUMBA_DISABLE_JIT', '1'):
+            inner = closure(1)
+            self.assertTrue(isinstance(inner, decorators._DisableJitWrapper))
+            # run_with_protocols is used, whilst not ideal as
+            # simulate_fresh_target isn't needed it does no harm and means
+            # existing code can be used.
+            self.run_with_protocols(self.check_call, inner, 6, (2, 3))
+            
+            # check that the `__name__` attr of the jitted is the same as the
+            # original
+            def foo123():
+                pass
+            self.assertTrue(jit(foo123).__name__, foo123.__name__)
 
 
 if __name__ == '__main__':

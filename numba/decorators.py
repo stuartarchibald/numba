@@ -5,14 +5,14 @@ Define @jit and related decorators.
 from __future__ import print_function, division, absolute_import
 
 import sys
+import uuid
 import warnings
+import weakref
 
 from . import config, sigutils
 from .errors import DeprecationError
 from .targets import registry
 from .stencil import stencil
-
-
 
 # -----------------------------------------------------------------------------
 # Decorators
@@ -28,12 +28,54 @@ def autojit(*args, **kws):
 
 
 class _DisableJitWrapper(object):
+    # This borrows custom serialization from Dispatcher
+    _memo = weakref.WeakValueDictionary()
+    __uuid = None
+
     def __init__(self, py_func):
         self.py_func = py_func
+        self.__name__ = py_func.__name__
 
     def __call__(self, *args, **kwargs):
         return self.py_func(*args, **kwargs)
+    
+    def __reduce__(self):
+        from numba import serialize
+        return (serialize._rebuild_reduction,
+                (self.__class__, str(self._uuid),
+                 serialize._reduce_function(self.py_func, locals), locals))
+    @classmethod
+    def _rebuild(cls, uuid, func_reduced, locals):
+        from numba import serialize
+        try:
+            return cls._memo[uuid]
+        except KeyError:
+            pass
+        py_func = serialize._rebuild_function(*func_reduced)
+        self = cls(py_func, locals)
+        # Make sure this deserialization will be merged with subsequent ones
+        self._set_uuid(uuid)
+        return self
+        
+    @property
+    def _uuid(self):
+        """
+        An instance-specific UUID, to avoid multiple deserializations of
+        a given instance.
 
+        Note this is lazily-generated, for performance reasons.
+        """
+        u = self.__uuid
+        if u is None:
+            u = str(uuid.uuid1())
+            self._set_uuid(u)
+        return u
+
+    def _set_uuid(self, u):
+        assert self.__uuid is None
+        self.__uuid = u
+        self._memo[u] = self
+        
 
 _msg_deprecated_signature_arg = ("Deprecated keyword argument `{0}`. "
                                  "Signatures should be passed as the first "
