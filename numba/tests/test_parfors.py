@@ -57,6 +57,13 @@ class TestParforsBase(TestCase):
         self.pflags = Flags()
         self.pflags.set('auto_parallel', cpu.ParallelOptions(True))
         self.pflags.set('nrt')
+
+        # flags for njit(parallel=True, fastmath=True, error_model='numpy')
+        self.fast_pflags = Flags()
+        self.fast_pflags.set('auto_parallel', cpu.ParallelOptions(True))
+        self.fast_pflags.set('nrt')
+        self.fast_pflags.set('fastmath')
+        self.fast_pflags.set('error_model', 'numpy')
         super(TestParforsBase, self).__init__(*args)
 
     def _compile_this(self, func, sig, flags):
@@ -64,6 +71,9 @@ class TestParforsBase(TestCase):
 
     def compile_parallel(self, func, sig):
         return self._compile_this(func, sig, flags=self.pflags)
+
+    def compile_parallel_fastmath(self, func, sig):
+        return self._compile_this(func, sig, flags=self.fast_pflags)
 
     def compile_njit(self, func, sig):
         return self._compile_this(func, sig, flags=self.cflags)
@@ -118,6 +128,78 @@ class TestParforsBase(TestCase):
                 raise ValueError(msg % scheduler_type)
 
         self.assertIn(scheduler_str, cpfunc.library.get_llvm_str())
+
+    def _get_gufunc_ir(self, cres):
+        """
+        Returns the IR of the gufuncs used as parfor kernels
+        as a dict mapping the gufunc name to its IR.
+
+        Arguments:
+         cres - a CompileResult from `njit(parallel=True, ...)`
+        """
+
+        # get known modules
+        _modules = [x for x in cres.library._codegen._engine._ee._modules]
+
+        def filter_mod(mod, magicstr, checkstr=None):
+            filt = [x for x in mod if magicstr in x.name]
+            if checkstr is not None:
+                for x in filt:
+                    assert checkstr in str(x)
+            return filt
+
+        # get the gufunc modules
+        magicstr = '__numba_parfor_gufunc'
+        gufuncs = filter_mod(_modules, magicstr)
+
+        def get_asm(mod):
+            # unused but left in as it is useful for debugging
+            tm = cres.library._codegen._tm
+            return str(tm.emit_assembly(mod))
+
+        _ir = dict()
+        for k in gufuncs:
+            _ir[k.name] = str(k)
+
+        return _ir
+
+
+    def assert_fastmath(self, pyfunc, sig):
+        """
+        Asserts that the fastmath flag has some effect in that suitable
+        instructions are now labelled as `fast`. Whether LLVM can actually do
+        anything to optimise better now the derestrictions are supplied is
+        another matter!
+
+        Arguments:
+         pyfunc - a function that contains operations with parallel semantics
+         sig - the type signature of pyfunc
+        """
+
+        cres = self.compile_parallel_fastmath(pyfunc, sig)
+        _ir = self._get_gufunc_ir(cres)
+
+        def _get_fast_instructions(ir):
+            splitted = ir.splitlines()
+            fast_inst = []
+            for x in splitted:
+                if 'fast' in x:
+                    fast_inst.append(x)
+            return fast_inst
+
+        def _assert_fast(instrs):
+            ops = ('fadd', 'fsub', 'fmul', 'fdiv', 'frem', 'fcmp')
+            for inst in instrs:
+                count = 0
+                for op in ops:
+                    match = op + ' fast'
+                    if match in inst:
+                        count += 1
+                self.assertTrue(count > 0)
+
+        for name, guir in _ir.items():
+            inst = _get_fast_instructions(guir)
+            _assert_fast(inst)
 
 
 def test1(sptprice, strike, rate, volatility, timev):
@@ -773,73 +855,16 @@ class TestParfors(TestParforsBase):
 
 class TestPrange(TestParforsBase):
 
-    def prange_tester(self, pyfunc, *args, **kwargs):
+    def generate_prange_func(self, pyfunc, patch_instance):
         """
-        The `prange` tester
-        This is a hack. It basically switches out range calls for prange.
-        It does this by copying the live code object of a function
-        containing 'range' then copying the .co_names and mutating it so
-        that 'range' is replaced with 'prange'. It then creates a new code
-        object containing the mutation and instantiates a function to contain
-        it. At this point three results are created:
-        1. The result of calling the original python function.
-        2. The result of calling a njit compiled version of the original
-            python function.
-        3. The result of calling a njit(parallel=True) version of the mutated
-           function containing `prange`.
-        The three results are then compared and the `prange` based function's
-        llvm_ir is inspected to ensure the scheduler code is present.
-
-        Arguments:
-         pyfunc - the python function to test
-         args - data arguments to pass to the pyfunc under test
-
-        Keyword Arguments:
-         patch_instance - iterable containing which instances of `range` to
-                          replace. If not present all instance of `range` are
-                          replaced.
-         scheduler_type - 'signed', 'unsigned' or None, default is None.
-                           Supply in cases where the presence of a specific
-                           scheduler is to be asserted.
-         Remaining kwargs are passed to np.testing.assert_almost_equal
-
-
-        Example:
-            def foo():
-                acc = 0
-                for x in range(5):
-                    for y in range(10):
-                        acc +=1
-                return acc
-
-            # calling as
-            prange_tester(foo)
-            # will test code equivalent to
-            # def foo():
-            #     acc = 0
-            #     for x in prange(5): # <- changed
-            #         for y in prange(10): # <- changed
-            #             acc +=1
-            #     return acc
-
-            # calling as
-            prange_tester(foo, patch_instance=[1])
-            # will test code equivalent to
-            # def foo():
-            #     acc = 0
-            #     for x in range(5): # <- outer loop (0) unchanged
-            #         for y in prange(10): # <- inner loop (1) changed
-            #             acc +=1
-            #     return acc
-
+        This function does the actual code augmentation to enable the explicit
+        testing of `prange` calls in place of `range`.
         """
-
         pyfunc_code = pyfunc.__code__
 
         prange_names = list(pyfunc_code.co_names)
 
-        patch_instance = kwargs.pop('patch_instance', None)
-        if not patch_instance:
+        if patch_instance is None:
             # patch all instances, cheat by just switching
             # range for prange
             assert 'range' in pyfunc_code.co_names
@@ -893,6 +918,75 @@ class TestPrange(TestParforsBase):
         # get function
         pfunc = pytypes.FunctionType(prange_code, globals())
 
+        return pfunc
+
+    def prange_tester(self, pyfunc, *args, **kwargs):
+        """
+        The `prange` tester
+        This is a hack. It basically switches out range calls for prange.
+        It does this by copying the live code object of a function
+        containing 'range' then copying the .co_names and mutating it so
+        that 'range' is replaced with 'prange'. It then creates a new code
+        object containing the mutation and instantiates a function to contain
+        it. At this point three results are created:
+        1. The result of calling the original python function.
+        2. The result of calling a njit compiled version of the original
+            python function.
+        3. The result of calling a njit(parallel=True) version of the mutated
+           function containing `prange`.
+        The three results are then compared and the `prange` based function's
+        llvm_ir is inspected to ensure the scheduler code is present.
+
+        Arguments:
+         pyfunc - the python function to test
+         args - data arguments to pass to the pyfunc under test
+
+        Keyword Arguments:
+         patch_instance - iterable containing which instances of `range` to
+                          replace. If not present all instance of `range` are
+                          replaced.
+         scheduler_type - 'signed', 'unsigned' or None, default is None.
+                           Supply in cases where the presence of a specific
+                           scheduler is to be asserted.
+         check_fastmath - if True then a check will be performed to ensure the
+                          IR contains instructions labelled with 'fast'
+         Remaining kwargs are passed to np.testing.assert_almost_equal
+
+
+        Example:
+            def foo():
+                acc = 0
+                for x in range(5):
+                    for y in range(10):
+                        acc +=1
+                return acc
+
+            # calling as
+            prange_tester(foo)
+            # will test code equivalent to
+            # def foo():
+            #     acc = 0
+            #     for x in prange(5): # <- changed
+            #         for y in prange(10): # <- changed
+            #             acc +=1
+            #     return acc
+
+            # calling as
+            prange_tester(foo, patch_instance=[1])
+            # will test code equivalent to
+            # def foo():
+            #     acc = 0
+            #     for x in range(5): # <- outer loop (0) unchanged
+            #         for y in prange(10): # <- inner loop (1) changed
+            #             acc +=1
+            #     return acc
+
+        """
+        patch_instance = kwargs.pop('patch_instance', None)
+        check_fastmath = kwargs.pop('check_fastmath', False)
+
+        pfunc = self.generate_prange_func(pyfunc, patch_instance)
+
         # Compile functions
         # compile a standard njit of the original function
         sig = tuple([numba.typeof(x) for x in args])
@@ -904,6 +998,10 @@ class TestPrange(TestParforsBase):
         # compare
         self.check_parfors_vs_others(pyfunc, cfunc, cpfunc, *args, **kwargs)
 
+        # if check_fastmath is True then check fast instructions
+        if check_fastmath:
+            self.assert_fastmath(pfunc, sig)
+
     @skip_unsupported
     def test_prange01(self):
         def test_impl():
@@ -912,7 +1010,8 @@ class TestPrange(TestParforsBase):
             for i in range(n):
                 A[i] = 2.0 * i
             return A
-        self.prange_tester(test_impl, scheduler_type='unsigned')
+        self.prange_tester(test_impl, scheduler_type='unsigned',
+                           check_fastmath=True)
 
     @skip_unsupported
     def test_prange02(self):
@@ -922,7 +1021,8 @@ class TestPrange(TestParforsBase):
             for i in range(1, n):
                 A[i - 1] = 2.0 * i
             return A
-        self.prange_tester(test_impl, scheduler_type='unsigned')
+        self.prange_tester(test_impl, scheduler_type='unsigned',
+                           check_fastmath=True)
 
     @skip_unsupported
     def test_prange03(self):
@@ -931,7 +1031,8 @@ class TestPrange(TestParforsBase):
             for i in range(10):
                 s += 2
             return s
-        self.prange_tester(test_impl, scheduler_type='unsigned')
+        self.prange_tester(test_impl, scheduler_type='unsigned',
+                           check_fastmath=True)
 
     @skip_unsupported
     def test_prange04(self):
@@ -945,7 +1046,8 @@ class TestPrange(TestParforsBase):
                 else:
                     A[i] = 0
             return A
-        self.prange_tester(test_impl, scheduler_type='unsigned')
+        self.prange_tester(test_impl, scheduler_type='unsigned',
+                           check_fastmath=True)
 
     @skip_unsupported
     def test_prange05(self):
@@ -956,7 +1058,8 @@ class TestPrange(TestParforsBase):
             for i in range(1, n - 1, 1):
                 s += A[i]
             return s
-        self.prange_tester(test_impl, scheduler_type='unsigned')
+        self.prange_tester(test_impl, scheduler_type='unsigned',
+                           check_fastmath=True)
 
     @skip_unsupported
     def test_prange06(self):
@@ -967,7 +1070,8 @@ class TestPrange(TestParforsBase):
             for i in range(1, 1, 1):
                 s += A[i]
             return s
-        self.prange_tester(test_impl, scheduler_type='unsigned')
+        self.prange_tester(test_impl, scheduler_type='unsigned',
+                           check_fastmath=True)
 
     @skip_unsupported
     def test_prange07(self):
@@ -978,7 +1082,8 @@ class TestPrange(TestParforsBase):
             for i in range(n, 1):
                 s += A[i]
             return s
-        self.prange_tester(test_impl, scheduler_type='unsigned')
+        self.prange_tester(test_impl, scheduler_type='unsigned',
+                           check_fastmath=True)
 
     @skip_unsupported
     def test_prange08(self):
@@ -990,7 +1095,8 @@ class TestPrange(TestParforsBase):
                 for j in range(len(A)):
                     acc += A[i]
             return acc
-        self.prange_tester(test_impl, scheduler_type='unsigned')
+        self.prange_tester(test_impl, scheduler_type='unsigned',
+                           check_fastmath=True)
 
     @skip_unsupported
     def test_prange08_1(self):
@@ -1002,7 +1108,8 @@ class TestPrange(TestParforsBase):
                 for j in range(4):
                     acc += A[i]
             return acc
-        self.prange_tester(test_impl, scheduler_type='unsigned')
+        self.prange_tester(test_impl, scheduler_type='unsigned',
+                           check_fastmath=True)
 
     @skip_unsupported
     def test_prange09(self):
@@ -1014,7 +1121,9 @@ class TestPrange(TestParforsBase):
                     acc += 1
             return acc
         # patch inner loop to 'prange'
-        self.prange_tester(test_impl, patch_instance=[1], scheduler_type='unsigned')
+        self.prange_tester(test_impl, patch_instance=[1],
+                           scheduler_type='unsigned',
+                           check_fastmath=True)
 
     @skip_unsupported
     def test_prange10(self):
@@ -1028,7 +1137,9 @@ class TestPrange(TestParforsBase):
                 acc2 += acc1
             return acc2
         # patch outer loop to 'prange'
-        self.prange_tester(test_impl, patch_instance=[0], scheduler_type='unsigned')
+        self.prange_tester(test_impl, patch_instance=[0],
+                           scheduler_type='unsigned',
+                           check_fastmath=True)
 
     @skip_unsupported
     @unittest.skip("list append is not thread-safe yet (#2391, #2408)")
@@ -1036,7 +1147,8 @@ class TestPrange(TestParforsBase):
         def test_impl():
             n = 4
             return [np.sin(j) for j in range(n)]
-        self.prange_tester(test_impl, scheduler_type='unsigned')
+        self.prange_tester(test_impl, scheduler_type='unsigned',
+                           check_fastmath=True)
 
     @skip_unsupported
     def test_prange12(self):
@@ -1047,7 +1159,8 @@ class TestPrange(TestParforsBase):
             for i in range(-len(X)):
                 acc += X[i]
             return acc
-        self.prange_tester(test_impl, scheduler_type='unsigned')
+        self.prange_tester(test_impl, scheduler_type='unsigned',
+                           check_fastmath=True)
 
     @skip_unsupported
     def test_prange13(self):
@@ -1056,7 +1169,8 @@ class TestPrange(TestParforsBase):
             for i in range(n):
                 acc += 1
             return acc
-        self.prange_tester(test_impl, np.int32(4), scheduler_type='unsigned')
+        self.prange_tester(test_impl, np.int32(4), scheduler_type='unsigned',
+                           check_fastmath=True)
 
     @skip_unsupported
     def test_prange14(self):
@@ -1068,7 +1182,9 @@ class TestPrange(TestParforsBase):
         # this tests reduction detection well since the accumulated variable
         # is initialized before the parfor and the value accessed from the array
         # is updated before accumulation
-        self.prange_tester(test_impl, np.random.ranf(4), scheduler_type='unsigned')
+        self.prange_tester(test_impl, np.random.ranf(4),
+                           scheduler_type='unsigned',
+                           check_fastmath=True)
 
     @skip_unsupported
     def test_prange15(self):
@@ -1080,7 +1196,8 @@ class TestPrange(TestParforsBase):
                 x = np.ones((1, 1))
                 acc += x[0, 0]
             return acc
-        self.prange_tester(test_impl, 1024, scheduler_type='unsigned')
+        self.prange_tester(test_impl, 1024, scheduler_type='unsigned',
+                           check_fastmath=True)
 
     # Tests for negative ranges
     @skip_unsupported
@@ -1090,9 +1207,9 @@ class TestPrange(TestParforsBase):
             for i in range(-N, N):
                 acc += 2
             return acc
-        self.prange_tester(test_impl, 1024, scheduler_type='signed')
+        self.prange_tester(test_impl, 1024, scheduler_type='signed',
+                           check_fastmath=True)
 
-    # currently fails
     @skip_unsupported
     def test_prange17(self):
         def test_impl(N):
@@ -1101,9 +1218,9 @@ class TestPrange(TestParforsBase):
             for i in range(-N, N):
                 acc += X[i]
             return acc
-        self.prange_tester(test_impl, 9, scheduler_type='signed')
+        self.prange_tester(test_impl, 9, scheduler_type='signed',
+                           check_fastmath=True)
 
-    # currently fails
     @skip_unsupported
     def test_prange18(self):
         def test_impl(N):
@@ -1114,9 +1231,9 @@ class TestPrange(TestParforsBase):
                 for j in range(-4, N):
                     acc += X[j]
             return acc
-        self.prange_tester(test_impl, 9, scheduler_type='signed')
+        self.prange_tester(test_impl, 9, scheduler_type='signed',
+                           check_fastmath=True)
 
-    # currently fails
     @skip_unsupported
     def test_prange19(self):
         def test_impl(N):
@@ -1127,9 +1244,9 @@ class TestPrange(TestParforsBase):
                 for j in range(-M, M):
                     acc += X[i, j]
             return acc
-        self.prange_tester(test_impl, 9, scheduler_type='signed')
+        self.prange_tester(test_impl, 9, scheduler_type='signed',
+                           check_fastmath=True)
 
-    # currently fails
     @skip_unsupported
     def test_prange20(self):
         def test_impl(N):
@@ -1138,7 +1255,8 @@ class TestPrange(TestParforsBase):
             for i in range(-1, N):
                 acc += X[i]
             return acc
-        self.prange_tester(test_impl, 9, scheduler_type='signed')
+        self.prange_tester(test_impl, 9, scheduler_type='signed',
+                           check_fastmath=True)
 
     @skip_unsupported
     def test_prange21(self):
@@ -1147,13 +1265,13 @@ class TestPrange(TestParforsBase):
             for i in range(-3, -1):
                 acc += 3
             return acc
-        self.prange_tester(test_impl, 9, scheduler_type='signed')
+        self.prange_tester(test_impl, 9, scheduler_type='signed',
+                           check_fastmath=True)
 
-    # segfaults
     @skip_unsupported
     def test_prange22(self):
         def test_impl():
-            a = 2
+            a = 0
             b = 3
             A = np.empty(4)
             for i in range(-2, 2):
@@ -1164,7 +1282,8 @@ class TestPrange(TestParforsBase):
                 else:
                     A[i] = 7
             return A
-        self.prange_tester(test_impl, scheduler_type='signed')
+        self.prange_tester(test_impl, scheduler_type='signed',
+                           check_fastmath=True)
 
     @skip_unsupported
     def test_prange_raises_invalid_step_size(self):
@@ -1178,6 +1297,37 @@ class TestPrange(TestParforsBase):
             self.prange_tester(test_impl, 1024)
         msg = 'Only constant step size of 1 is supported for prange'
         self.assertIn(msg, str(raises.exception))
+
+    @skip_unsupported
+    def test_prange_fastmath_check_works(self):
+        # this function will benefit from `fastmath`, the div will
+        # get optimised a multiply by reciprocal and the accumulator
+        # then becomes an fmadd: A = A + i * 0.5
+        def test_impl():
+            n = 128
+            A = 0
+            for i in range(n):
+                A += i / 2.0
+            return A
+        self.prange_tester(test_impl, scheduler_type='unsigned',
+                           check_fastmath=True)
+        pfunc = self.generate_prange_func(test_impl, None)
+        cres = self.compile_parallel_fastmath(pfunc, ())
+        ir = self._get_gufunc_ir(cres)
+        _id = '%[A-Z]?.[0-9]+[.]?[i]?'
+        recipr_str = "\s+%s = fmul fast double %s, 5.000000e-01"
+        reciprocal_inst = re.compile(recipr_str % (_id, _id))
+        fadd_inst = re.compile("\s+%s = fadd fast double %s, %s"
+                               % (_id, _id, _id))
+        # check there is something like:
+        #  %.329 = fmul fast double %.325, 5.000000e-01
+        #  %.337 = fadd fast double %A.07, %.329
+        for name, kernel in ir.items():
+            splitted = kernel.splitlines()
+            for i, x in enumerate(splitted):
+                if reciprocal_inst.match(x):
+                    break
+            self.assertTrue(fadd_inst.match(splitted[i + 1]))
 
     @skip_unsupported
     def test_kde_example(self):
