@@ -29,7 +29,7 @@ from numba.ir_utils import (copy_propagate, apply_copy_propagate,
 from numba import ir
 from numba.compiler import compile_isolated, Flags
 from numba.bytecode import ByteCodeIter
-from .support import tag
+from .support import tag, override_env_config
 from .matmul_usecase import needs_blas
 from .test_linalg import needs_lapack
 
@@ -118,6 +118,9 @@ class TestParforsBase(TestCase):
         np.testing.assert_almost_equal(njit_output, py_expected, **kwargs)
         np.testing.assert_almost_equal(parfor_output, py_expected, **kwargs)
 
+        self.check_scheduling(cpfunc, scheduler_type)
+
+    def check_scheduling(self, cres, scheduler_type):
         # make sure parfor set up scheduling
         scheduler_str = '@do_scheduling'
         if scheduler_type is not None:
@@ -127,7 +130,30 @@ class TestParforsBase(TestCase):
                 msg = "Unknown scheduler_type specified: %s"
                 raise ValueError(msg % scheduler_type)
 
-        self.assertIn(scheduler_str, cpfunc.library.get_llvm_str())
+        self.assertIn(scheduler_str, cres.library.get_llvm_str())
+
+    def _filter_mod(self, mod, magicstr, checkstr=None):
+        """ helper function to filter out modules by name"""
+        filt = [x for x in mod if magicstr in x.name]
+        if checkstr is not None:
+            for x in filt:
+                assert checkstr in str(x)
+        return filt
+
+    def _get_gufunc_modules(self, cres, magicstr, checkstr=None):
+        """ gets the gufunc LLVM Modules"""
+        _modules = [x for x in cres.library._codegen._engine._ee._modules]
+        return self._filter_mod(_modules, magicstr, checkstr=checkstr)
+
+    def _get_gufunc_info(self, cres, fn):
+        """ helper for gufunc IR/asm generation"""
+        # get the gufunc modules
+        magicstr = '__numba_parfor_gufunc'
+        gufunc_mods = self._get_gufunc_modules(cres, magicstr)
+        x = dict()
+        for mod in gufunc_mods:
+            x[mod.name] = fn(mod)
+        return x
 
     def _get_gufunc_ir(self, cres):
         """
@@ -137,32 +163,20 @@ class TestParforsBase(TestCase):
         Arguments:
          cres - a CompileResult from `njit(parallel=True, ...)`
         """
+        return self._get_gufunc_info(cres, str)
 
-        # get known modules
-        _modules = [x for x in cres.library._codegen._engine._ee._modules]
+    def _get_gufunc_asm(self, cres):
+        """
+        Returns the assembly of the gufuncs used as parfor kernels
+        as a dict mapping the gufunc name to its assembly.
 
-        def filter_mod(mod, magicstr, checkstr=None):
-            filt = [x for x in mod if magicstr in x.name]
-            if checkstr is not None:
-                for x in filt:
-                    assert checkstr in str(x)
-            return filt
-
-        # get the gufunc modules
-        magicstr = '__numba_parfor_gufunc'
-        gufuncs = filter_mod(_modules, magicstr)
-
-        def get_asm(mod):
-            # unused but left in as it is useful for debugging
-            tm = cres.library._codegen._tm
+        Arguments:
+         cres - a CompileResult from `njit(parallel=True, ...)`
+        """
+        tm = cres.library._codegen._tm
+        def emit_asm(mod):
             return str(tm.emit_assembly(mod))
-
-        _ir = dict()
-        for k in gufuncs:
-            _ir[k.name] = str(k)
-
-        return _ir
-
+        return self._get_gufunc_info(cres, emit_asm)
 
     def assert_fastmath(self, pyfunc, sig):
         """
@@ -1382,6 +1396,195 @@ class TestPrange(TestParforsBase):
                   c[k] = i + j + k
             return b.sum()
         self.prange_tester(test_impl, 4)
+
+class TestParforsVectorizer(TestPrange):
+
+    # env mutating test
+    _numba_parallel_test_ = False
+
+    def get_gufunc_asm(self, func, schedule_type, *args, fastmath=False,
+                       nkernels=2, cpu_name='skylake-avx512', assertions=True):
+
+        env_opts = {'NUMBA_CPU_NAME': cpu_name,
+                    'NUMBA_CPU_FEATURES': '',
+                    'NUMBA_NUM_THREADS': str(nkernels)
+                    }
+
+        overrides = []
+        for k, v in env_opts.items():
+            overrides.append(override_env_config(k, v))
+
+        with overrides[0], overrides[1], overrides[2]:
+            sig = tuple([numba.typeof(x) for x in args])
+            pfunc_vectorizable = self.generate_prange_func(func, None)
+            if fastmath == True:
+                cres = self.compile_parallel_fastmath(pfunc_vectorizable, sig)
+            else:
+                cres = self.compile_parallel(pfunc_vectorizable, sig)
+
+            # make sure there's `nkernels` schedule calls of the same type
+            schedty = re.compile('call\s+\w+\*\s+@do_scheduling_(\w+)\(')
+            matches = schedty.findall(cres.library.get_llvm_str())
+
+            # get the gufunc asm
+            asm = self._get_gufunc_asm(cres)
+
+            if assertions:
+                self.assertEqual(len(matches), 2)
+                self.assertEqual(matches[0], matches[1])
+                self.assertTrue(asm != {})
+
+        return asm
+
+
+    def dump(self, asm, fname):
+        with open(fname, 'wt') as f:
+            for k, v in asm.items():
+                f.write(k)
+                f.write(v)
+
+    def test_vectorizer_fastmath_asm(self):
+        """ This checks that if fastmath is set and the underlying hardware
+        is suitable, and the function supplied is amenable to fastmath based
+        vectorization, that the vectorizer actually runs.
+        """
+
+        # This function will benefit from `fastmath` if run on a suitable
+        # target. The vectorizer should unwind the loop and generate
+        # packed dtype=double add and sqrt instructions.
+        def will_vectorize(A):
+            n = len(A)
+            for i in range(n):
+                A[i] += np.sqrt(i)
+            return A
+
+        arg = np.zeros(10)
+
+        fast_asm = self.get_gufunc_asm(will_vectorize, 'unsigned', arg,
+                                       fastmath=True)
+        slow_asm = self.get_gufunc_asm(will_vectorize, 'unsigned', arg,
+                                       fastmath=False)
+
+        for v in fast_asm.values():
+            # should unwind and call vector sqrt then vector add 
+            # all on packed doubles using zmm's
+            self.assertTrue('vaddpd' in v)
+            self.assertTrue('vsqrtpd' in v)
+            self.assertTrue('zmm' in v)
+
+        for v in slow_asm.values():
+            # vector variants should not be present
+            self.assertTrue('vaddpd' not in v)
+            self.assertTrue('vsqrtpd' not in v)
+            # check scalar variant is present
+            self.assertTrue('vsqrtsd' in v)
+            self.assertTrue('vaddsd' in v)
+            # check no zmm addressing is present
+            self.assertTrue('zmm' not in v)
+
+    def test_unsigned_refusal_to_vectorize(self):
+        """ This checks that if fastmath is set and the underlying hardware
+        is suitable, and the function supplied is amenable to fastmath based
+        vectorization, that the vectorizer actually runs.
+        """
+
+        def will_not_vectorize(A):
+            n = len(A)
+            for i in range(-n, 0):
+                A[i] = np.sqrt(A[i])
+            return A
+
+        def will_vectorize(A):
+            n = len(A)
+            for i in range(n):
+                A[i] = np.sqrt(A[i])
+            return A
+
+        arg = np.zeros(10)
+
+        novec_asm = self.get_gufunc_asm(will_not_vectorize, 'signed', arg,
+                                        fastmath=True)
+
+        vec_asm = self.get_gufunc_asm(will_vectorize, 'unsigned', arg,
+                                      fastmath=True)
+
+        for v in novec_asm.values():
+            # vector variant should not be present
+            self.assertTrue('vsqrtpd' not in v)
+            # check scalar variant is present
+            self.assertTrue('vsqrtsd' in v)
+            self.assertTrue('vaddsd' in v)
+            # check no zmm addressing is present
+            self.assertTrue('zmm' not in v)
+
+        for v in vec_asm.values():
+            # should unwind and call vector sqrt then vector mov
+            # all on packed doubles using zmm's
+            self.assertTrue('vsqrtpd' in v)
+            self.assertTrue('vmovupd' in v)
+            self.assertTrue('zmm' in v)
+
+
+    def test_signed_vs_unsigned_vec_asm(self):
+        """ This checks vectorization for signed vs unsigned variants of a
+        trivial accumulator, the only meaningful difference should be the
+        presence of signed vs. unsigned unpack instructions (for the
+        induction var).
+        """
+        def signed_variant():
+            n = 4096
+            A = 0.
+            for i in range(-n, 0):
+                A += i
+            return A
+
+        def unsigned_variant():
+            n = 4096
+            A = 0.
+            for i in range(n):
+                A += i
+            return A
+
+        signed_asm = self.get_gufunc_asm(signed_variant, 'signed',
+                                         fastmath=True)
+        unsigned_asm = self.get_gufunc_asm(unsigned_variant, 'unsigned',
+                                           fastmath=True)
+
+        def strip_instrs(asm):
+            acc = []
+            for x in asm.splitlines():
+                spd = x.strip()
+                # filter out anything that isn't a trivial instruction
+                # and anything with the gufunc id as it contains an address
+                if spd != '' and not (spd.startswith('.')
+                                     or spd.startswith('_') 
+                                     or spd.startswith('"')
+                                     or '__numba_parfor_gufunc' in spd):
+                        acc.append(re.sub('[\t]', '', spd))
+            return acc
+
+        for k, v in signed_asm.items():
+            signed_instr = strip_instrs(v)
+            break
+
+        for k, v in unsigned_asm.items():
+            unsigned_instr = strip_instrs(v)
+            break
+
+        from difflib import SequenceMatcher as sm
+        # make sure that the only difference in instruction (if there is a
+        # difference) is the char 'u'. For example:
+        # vcvtsi2sdq vs. vcvtusi2sdq
+        self.assertEqual(len(signed_instr), len(unsigned_instr))
+        for a, b in zip(signed_instr, unsigned_instr):
+            if a == b:
+                continue
+            else:
+                s = sm(lambda x: x == '\t', a, b)
+                ops = s.get_opcodes()
+                for op in ops:
+                    if op[0] == 'insert':
+                        self.assertEqual(b[op[-2]:op[-1]], 'u')
 
 class TestParforsSlice(TestParforsBase):
 
