@@ -89,6 +89,9 @@ def bad_float_index(arr):
     # fails typing
     return arr[1, 2.0]
 
+def np_reshape(a, shape):
+    return np.reshape(a, shape)
+
 
 class TestArrayManipulation(MemoryLeakMixin, TestCase):
     """
@@ -456,6 +459,13 @@ class TestArrayManipulation(MemoryLeakMixin, TestCase):
                              (types.Array(types.float64, 2, 'C'),))
         self.assertIn('unsupported array index type float64',
                       str(raises.exception))
+
+    def test_np_reshape(self):
+        pyfunc = np_reshape
+        cfunc = jit(nopython=True)(pyfunc)
+        x = np.arange(12)
+        shp = (3, 4)
+        np.testing.assert_equal(pyfunc(x, shp), cfunc(x, shp))
 
 
 if __name__ == '__main__':

@@ -25,7 +25,7 @@ from numba.targets.imputils import (lower_builtin, lower_getattr,
                                     iternext_impl, impl_ret_borrowed,
                                     impl_ret_new_ref, impl_ret_untracked)
 from numba.typing import signature
-from numba.extending import register_jitable
+from numba.extending import register_jitable, overload
 from . import quicksort, slicing
 
 
@@ -1658,6 +1658,12 @@ def array_ravel(context, builder, sig, args):
     res = context.compile_internal(builder, imp, sig, args)
     res = impl_ret_new_ref(context, builder, sig.return_type, res)
     return res
+
+@overload(np.reshape)
+def np_reshape(A, shape):
+    def impl(A, shape):
+        return A.reshape(shape)
+    return impl
 
 
 @lower_builtin(np.ravel, types.Array)
