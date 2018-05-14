@@ -179,7 +179,11 @@ def array_imag(a):
     return np.imag(a)
 
 
-def np_unique(a, return_counts=False):
+def np_unique(a):
+    return np.unique(a)
+
+
+def np_unique_kws(a, return_counts):
     return np.unique(a, return_counts=return_counts)
 
 
@@ -872,18 +876,30 @@ class TestArrayMethods(MemoryLeakMixin, TestCase):
         pyfunc = np_unique
         cfunc = jit(nopython=True)(pyfunc)
 
+        pyfunc_kws = np_unique_kws
+        cfunc_kws = jit(nopython=True)(pyfunc_kws)
+
         def check(a):
             np.testing.assert_equal(pyfunc(a), cfunc(a))
 
         def check_w_counts(a):
             np.testing.assert_equal(
-                pyfunc(a, return_counts=True), cfunc(a, return_counts=True))
+                pyfunc_kws(a, True), cfunc_kws(a, True))
 
         for check_ in [check, check_w_counts]:
             check_(np.array([[1, 1, 3], [3, 4, 5]]))
             check_(np.array(np.zeros(5)))
             check_(np.array([[3.1, 3.1], [1.7, 2.29], [3.3, 1.7]]))
             check_(np.array([]))
+
+    def test_unique_invalid_kwarg(self):
+
+        with self.assertRaises(TypingError):
+            fn = jit(nopython=True)(np_unique_kws)
+            fn(np.arange(5.), 'bad')
+
+        #exceptions leak refs
+        self.disable_leak_check()
 
     def test_array_dot(self):
         # just ensure that the dot impl dispatches correctly, do
