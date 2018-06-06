@@ -291,6 +291,7 @@ class BasePipeline(object):
         self.typemap = None
         self.calltypes = None
         self.type_annotation = None
+        self.parfor_replaced_fns = dict() # container for holding the results of parfor function replacement
 
         self.status = _CompileStatus(
             can_fallback=self.flags.enable_pyobject,
@@ -505,7 +506,8 @@ class BasePipeline(object):
             self.func_ir,
             self.type_annotation.typemap,
             self.type_annotation.calltypes, self.typingctx,
-            self.flags.auto_parallel
+            self.flags.auto_parallel,
+            self.parfor_replaced_fns
             )
         preparfor_pass.run()
 
@@ -517,7 +519,7 @@ class BasePipeline(object):
         assert self.func_ir
         parfor_pass = ParforPass(self.func_ir, self.type_annotation.typemap,
             self.type_annotation.calltypes, self.return_type, self.typingctx,
-            self.flags.auto_parallel, self.flags)
+            self.flags.auto_parallel, self.flags, self.parfor_replaced_fns)
         parfor_pass.run()
 
         if config.WARNINGS:
