@@ -16,7 +16,7 @@ from __future__ import print_function, division, absolute_import
 import types as pytypes  # avoid confusion with numba.types
 import sys, math
 from functools import reduce
-from collections import defaultdict
+from collections import defaultdict, OrderedDict
 from contextlib import contextmanager
 
 import numba
@@ -458,14 +458,18 @@ class Parfor(ir.Expr, ir.Stmt):
             print(fmt.format(
                   self.id, pattern, loc))
         if config.PARALLEL_DIAGNOSTICS:
-            if pattern[0] == 'prange' and pattern[1] == 'internal':
-                replfn = '.'.join(reversed(list(pattern[2][0])))
-                loc = pattern[2][1]
-                pattern = '%s %s' % (replfn, '(internal parallel version)')
+            if pattern[0] == 'prange':
+                if pattern[1] == 'internal':
+                    replfn = '.'.join(reversed(list(pattern[2][0])))
+                    loc = pattern[2][1]
+                    pattern = '%s %s' % (replfn, '(internal parallel version)')
+                elif pattern[1] == 'user':
+                    pattern = "user defined prange"
+                else:
+                    assert 0
             fmt = 'A parallel for-loop (labelled as #{}) is produced from: \'{}\' at {}'
             print(fmt.format(
-                  self.id, pattern, loc.line))
-            
+                  self.id, pattern, loc))
 
     def __repr__(self):
         return "id=" + str(self.id) + repr(self.loop_nests) + \
@@ -588,7 +592,6 @@ class PreParforPass(object):
                             for call in call_table:
                                 for k, v in call.items():
                                     if v[0] == 'internal_prange':
-                                        #import pdb; pdb.set_trace()
                                         swapped[k] = [callname, repl_func.__name__, func_def, block.body[i].loc]
                                         break
                             return True
@@ -640,10 +643,9 @@ class ParforPass(object):
                                                            calltypes)
         ir_utils._max_label = max(func_ir.blocks.keys())
         self.flags = flags
+        self.fusion_info = defaultdict(list)
 
     def run(self):
-        #import pdb; pdb.set_trace()
-
         """run parfor conversion pass: replace Numpy calls
         with Parfors when possible and optimize the IR."""
         # run array analysis, a pre-requisite for parfor translation
@@ -675,6 +677,14 @@ class ParforPass(object):
         simplify(self.func_ir, self.typemap, self.calltypes)
 
         if self.options.fusion:
+            if config.PARALLEL_DIAGNOSTICS:
+                name = self.func_ir.func_id.func_qualname
+                line = self.func_ir.loc
+                internal_name = '__numba_parfor_gufunc'
+                if not internal_name in name:
+                    msg = ("\nAttempting parallel loop fusion (combines loops with"
+                        " similar bounds) for function '%s', %s:")
+                    print(msg % (name, line))
             self.func_ir._definitions = build_definitions(self.func_ir.blocks)
             self.array_analysis.equiv_sets = dict()
             self.array_analysis.run(self.func_ir.blocks)
@@ -728,13 +738,46 @@ class ParforPass(object):
                     print('Function {} has no Parfor.'.format(name))
             if config.PARALLEL_DIAGNOSTICS:
                 name = self.func_ir.func_id.func_qualname
-                line = self.func_ir.loc.line
-                #import pdb; pdb.set_trace()
+                line = self.func_ir.loc
                 n_parfors = len(parfor_ids)
                 if n_parfors > 0:
+                    def dump_graph(a):
+                        vtx = set()
+                        for v in a.values():
+                            for x in v:
+                                vtx.add(x)
+
+                        potential_roots = set(a.keys())
+                        roots = potential_roots - vtx
+
+                        for x in range(max(vtx)):
+                            a[x] = a.get(x, [])
+
+                        l = []
+                        for x in sorted(a.keys()):
+                            l.append(a[x])
+
+                        def print_graph(adj, roots):
+                            fac = 3
+                            def print_g(adj, root, depth):
+                                for k in adj[root]:
+                                    print(fac * depth * ' ' + '+--%s' % k)
+                                    if adj[k] != []:
+                                        print_g(adj, k, depth + 1)
+                            for r in roots:
+                                print('+--%s (fuses the following)' % r)
+                                print_g(l, r, 1)
+                                print("")
+
+                        print_graph(l, roots)
+
+                    if self.fusion_info != {}:
+                        print("\nFused loop graphic:")
+                        dump_graph(self.fusion_info)
+
                     after_fusion = ("Following the fusion of parallel for-loops" if self.options.fusion
                                     else "With fusion disabled")
-                    print(('{}, function \'{}\' (line {}) has '
+                    print(('\n{}, function \'{}\' (line {}) has '
                            '{} parallel for-loop(s) (originating from loops labelled {}).').format(
                            after_fusion, name, line, n_parfors, ''.join(['#%s, ' % x for x in parfor_ids])))
                 else:
@@ -850,7 +893,6 @@ class ParforPass(object):
         loops = cfg.loops()
         sized_loops = [(loops[k], len(loops[k].body)) for k in loops.keys()]
         moved_blocks = []
-        #import pdb; pdb.set_trace()
         # We go over all loops, smaller loops first (inner first)
         for loop, s in sorted(sized_loops, key=lambda tup: tup[1]):
             if len(loop.entries) != 1 or len(loop.exits) != 1:
@@ -1319,7 +1361,6 @@ class ParforPass(object):
                 avail_vars))
         
         if config.PARALLEL_DIAGNOSTICS:
-            #import pdb; pdb.set_trace()
             pat = ('array expression {}'.format(repr_arrayexpr(arrayexpr.expr)),)
         else:
             pat = ('arrayexpr {}'.format(repr_arrayexpr(arrayexpr.expr)),)
@@ -1629,6 +1670,7 @@ class ParforPass(object):
                         fused_node = try_fuse(equiv_set, stmt, next_stmt)
                         if fused_node is not None:
                             fusion_happened = True
+                            self.fusion_info[stmt.id].extend([next_stmt.id])
                             new_body.append(fused_node)
                             self.fuse_recursive_parfor(fused_node, equiv_set)
                             i += 2
@@ -2059,13 +2101,13 @@ def get_parfor_params_inner(parfor, pre_defs, options_fusion):
     usedefs = compute_use_defs(blocks)
     live_map = compute_live_map(cfg, blocks, usedefs.usemap, usedefs.defmap)
     parfor_ids = get_parfor_params(blocks, options_fusion)
-    if config.DEBUG_ARRAY_OPT_STATS:
+    if config.DEBUG_ARRAY_OPT_STATS or config.PARALLEL_DIAGNOSTICS:
         n_parfors = len(parfor_ids)
         if n_parfors > 0:
              after_fusion = ("After fusion" if options_fusion
                              else "With fusion disabled")
-             print(('After fusion, parallel for-loop {} has '
-                   '{} nested Parfor(s) #{}.').format(
+             print(('{}, parallel for-loop {} has '
+                   'nested Parfor(s) #{}.').format(
                   after_fusion, parfor.id, n_parfors, parfor_ids))
     unwrap_parfor_blocks(parfor)
     keylist = sorted(live_map.keys())
@@ -2978,7 +3020,7 @@ def repr_arrayexpr(arrayexpr):
     elif isinstance(arrayexpr, numba.ir.Var):
         name = arrayexpr.name
         if name.startswith('$'):
-            return '\'%s\' (%s is a temporary variable)' % (2*(name,))
+            return '\'%s\' (temporary variable)' % name
         else:
             return name
     elif isinstance(arrayexpr, numba.ir.Const):
