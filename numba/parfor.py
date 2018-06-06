@@ -457,6 +457,15 @@ class Parfor(ir.Expr, ir.Stmt):
             fmt = 'Parallel for-loop #{} is produced from pattern \'{}\' at {}'
             print(fmt.format(
                   self.id, pattern, loc))
+        if config.PARALLEL_DIAGNOSTICS:
+            if pattern[0] == 'prange' and pattern[1] == 'internal':
+                replfn = '.'.join(reversed(list(pattern[2][0])))
+                loc = pattern[2][1]
+                pattern = '%s %s' % (replfn, '(internal parallel version)')
+            fmt = 'A parallel for-loop (labelled as #{}) is produced from: \'{}\' at {}'
+            print(fmt.format(
+                  self.id, pattern, loc.line))
+            
 
     def __repr__(self):
         return "id=" + str(self.id) + repr(self.loop_nests) + \
@@ -518,12 +527,13 @@ class PreParforPass(object):
     """Preprocessing for the Parfor pass. It mostly inlines parallel
     implementations of numpy functions if available.
     """
-    def __init__(self, func_ir, typemap, calltypes, typingctx, options):
+    def __init__(self, func_ir, typemap, calltypes, typingctx, options, swapped):
         self.func_ir = func_ir
         self.typemap = typemap
         self.calltypes = calltypes
         self.typingctx = typingctx
         self.options = options
+        self.swapped = swapped
 
     def run(self):
         """Run pre-parfor processing pass.
@@ -537,10 +547,11 @@ class PreParforPass(object):
 
     def _replace_parallel_functions(self, blocks):
         """
-        Replace functions with their parallel implemntation in
+        Replace functions with their parallel implmentation in
         replace_functions_map if available.
         The implementation code is inlined to enable more optimization.
         """
+        swapped = self.swapped
         from numba.inline_closurecall import inline_closure_call
         work_list = list(blocks.items())
         while work_list:
@@ -551,7 +562,7 @@ class PreParforPass(object):
                     lhs_typ = self.typemap[lhs.name]
                     expr = instr.value
                     if isinstance(expr, ir.Expr) and expr.op == 'call':
-                        # Try inline known calls with their parallel implementations
+                        # Try and inline known calls with their parallel implementations
                         def replace_func():
                             func_def = get_definition(self.func_ir, expr.func)
                             callname = find_callname(self.func_ir, expr)
@@ -568,9 +579,18 @@ class PreParforPass(object):
                             g['np'] = numpy
                             g['math'] = math
                             # inline the parallel implementation
-                            inline_closure_call(self.func_ir, g,
+                            new_blocks = inline_closure_call(self.func_ir, g,
                                             block, i, new_func, self.typingctx, typs,
                                             self.typemap, self.calltypes, work_list)
+                            call_table = get_call_table(new_blocks, topological_ordering=False)
+                            
+                            # find the prange in the new blocks and record it for use in diagnostics
+                            for call in call_table:
+                                for k, v in call.items():
+                                    if v[0] == 'internal_prange':
+                                        #import pdb; pdb.set_trace()
+                                        swapped[k] = [callname, repl_func.__name__, func_def, block.body[i].loc]
+                                        break
                             return True
                         if guard(replace_func):
                             break
@@ -608,19 +628,22 @@ class ParforPass(object):
     stage.
     """
 
-    def __init__(self, func_ir, typemap, calltypes, return_type, typingctx, options, flags):
+    def __init__(self, func_ir, typemap, calltypes, return_type, typingctx, options, flags, swapped_fns):
         self.func_ir = func_ir
         self.typemap = typemap
         self.calltypes = calltypes
         self.typingctx = typingctx
         self.return_type = return_type
         self.options = options
+        self.swapped_fns = swapped_fns
         self.array_analysis = array_analysis.ArrayAnalysis(typingctx, func_ir, typemap,
                                                            calltypes)
         ir_utils._max_label = max(func_ir.blocks.keys())
         self.flags = flags
 
     def run(self):
+        #import pdb; pdb.set_trace()
+
         """run parfor conversion pass: replace Numpy calls
         with Parfors when possible and optimize the IR."""
         # run array analysis, a pre-requisite for parfor translation
@@ -703,6 +726,19 @@ class ParforPass(object):
                            after_fusion, name, n_parfors, parfor_ids))
                 else:
                     print('Function {} has no Parfor.'.format(name))
+            if config.PARALLEL_DIAGNOSTICS:
+                name = self.func_ir.func_id.func_qualname
+                line = self.func_ir.loc.line
+                #import pdb; pdb.set_trace()
+                n_parfors = len(parfor_ids)
+                if n_parfors > 0:
+                    after_fusion = ("Following the fusion of parallel for-loops" if self.options.fusion
+                                    else "With fusion disabled")
+                    print(('{}, function \'{}\' (line {}) has '
+                           '{} parallel for-loop(s) (originating from loops labelled {}).').format(
+                           after_fusion, name, line, n_parfors, ''.join(['#%s, ' % x for x in parfor_ids])))
+                else:
+                    print('Function {} has no Parfor.'.format(name))                
         return
 
     def _convert_numpy(self, blocks):
@@ -814,6 +850,7 @@ class ParforPass(object):
         loops = cfg.loops()
         sized_loops = [(loops[k], len(loops[k].body)) for k in loops.keys()]
         moved_blocks = []
+        #import pdb; pdb.set_trace()
         # We go over all loops, smaller loops first (inner first)
         for loop, s in sorted(sized_loops, key=lambda tup: tup[1]):
             if len(loop.entries) != 1 or len(loop.exits) != 1:
@@ -828,7 +865,7 @@ class ParforPass(object):
                     body_labels = [ l for l in loop.body if
                                     l in blocks and l != loop.header ]
                     args = inst.value.args
-                    loop_kind = self._get_loop_kind(inst.value.func.name,
+                    loop_kind, loop_replacing = self._get_loop_kind(inst.value.func.name,
                                                                     call_table)
                     # find loop index variable (pair_first in header block)
                     for stmt in blocks[loop.header].body:
@@ -1012,7 +1049,7 @@ class ParforPass(object):
                     parfor = Parfor(loops, init_block, loop_body, loc,
                                     orig_index_var if mask_indices else index_var,
                                     equiv_set,
-                                    ("prange", loop_kind),
+                                    ("prange", loop_kind, loop_replacing),
                                     self.flags)
                     # add parfor to entry block's jump target
                     jump = blocks[entry].body[-1]
@@ -1199,11 +1236,11 @@ class ParforPass(object):
         assert func_var in call_table
         call = call_table[func_var]
         assert len(call) > 0
-        kind = 'user'
+        kind = 'user', ''
         if call[0] == 'internal_prange' or call[0] == internal_prange:
-            kind = 'internal'
+            kind = 'internal', (self.swapped_fns[func_var][0], self.swapped_fns[func_var][-1])
         elif call[0] == 'pndindex' or call[0] == pndindex:
-            kind = 'pndindex'
+            kind = 'pndindex', ''
         return kind
 
     def _is_C_order(self, arr_name):
@@ -1280,10 +1317,14 @@ class ParforPass(object):
                 index_var,
                 index_vars,
                 avail_vars))
+        
+        if config.PARALLEL_DIAGNOSTICS:
+            #import pdb; pdb.set_trace()
+            pat = ('array expression {}'.format(repr_arrayexpr(arrayexpr.expr)),)
+        else:
+            pat = ('arrayexpr {}'.format(repr_arrayexpr(arrayexpr.expr)),)
 
-        parfor = Parfor(loopnests, init_block, {}, loc, index_var, equiv_set,
-                        ('arrayexpr {}'.format(repr_arrayexpr(arrayexpr.expr)),),
-                        self.flags)
+        parfor = Parfor(loopnests, init_block, {}, loc, index_var, equiv_set, pat[0], self.flags)
 
         setitem_node = ir.SetItem(lhs, index_var, expr_out_var, loc)
         self.calltypes[setitem_node] = signature(
@@ -2402,11 +2443,11 @@ def get_parfor_writes(parfor):
 def try_fuse(equiv_set, parfor1, parfor2):
     """try to fuse parfors and return a fused parfor, otherwise return None
     """
-    dprint("try_fuse trying to fuse \n", parfor1, "\n", parfor2)
+    dprint("try_fuse: trying to fuse \n", parfor1, "\n", parfor2)
 
     # fusion of parfors with different dimensions not supported yet
     if len(parfor1.loop_nests) != len(parfor2.loop_nests):
-        dprint("try_fuse parfors number of dimensions mismatch")
+        dprint("try_fuse: parfors number of dimensions mismatch")
         return None
 
     ndims = len(parfor1.loop_nests)
@@ -2421,13 +2462,13 @@ def try_fuse(equiv_set, parfor1, parfor2):
         if not (is_equiv(nest1.start, nest2.start) and
                 is_equiv(nest1.stop, nest2.stop) and
                 is_equiv(nest1.step, nest2.step)):
-            dprint("try_fuse parfor dimension correlation mismatch", i)
+            dprint("try_fuse: parfor dimension correlation mismatch", i)
             return None
 
     # TODO: make sure parfor1's reduction output is not used in parfor2
     # only data parallel loops
     if has_cross_iter_dep(parfor1) or has_cross_iter_dep(parfor2):
-        dprint("try_fuse parfor cross iteration dependency found")
+        dprint("try_fuse: parfor cross iteration dependency found")
         return None
 
     # find parfor1's defs, only body is considered since init_block will run
@@ -2443,7 +2484,7 @@ def try_fuse(equiv_set, parfor1, parfor2):
         p2_uses |= uses
 
     if not p1_body_defs.isdisjoint(p2_uses):
-        dprint("try_fuse parfor2 depends on parfor1 body")
+        dprint("try_fuse: parfor2 depends on parfor1 body")
         return None
 
     return fuse_parfors_inner(parfor1, parfor2)
@@ -2481,8 +2522,8 @@ def fuse_parfors_inner(parfor1, parfor2):
     nameset = set(x.name for x in index_dict.values())
     remove_duplicate_definitions(parfor1.loop_body, nameset)
     parfor1.patterns.extend(parfor2.patterns)
-    if config.DEBUG_ARRAY_OPT_STATS:
-        print('Parallel for-loop #{} is fused into for-loop #{}.'.format(
+    if config.DEBUG_ARRAY_OPT_STATS or config.PARALLEL_DIAGNOSTICS:
+        print('  Parallel for-loop #{} is fused into for-loop #{}.'.format(
               parfor2.id, parfor1.id))
 
     return parfor1
@@ -2533,7 +2574,7 @@ def has_cross_iter_dep(parfor):
 
 
 def dprint(*s):
-    if config.DEBUG_ARRAY_OPT == 1:
+    if config.DEBUG_ARRAY_OPT == 1: # or config.PARALLEL_DIAGNOSTICS:
         print(*s)
 
 
@@ -2930,9 +2971,18 @@ def repr_arrayexpr(arrayexpr):
                 opr = '_'  # can return dummy since repr is not critical
         args = arrayexpr[1]
         if len(args) == 1:
-            return '({}{})'.format(opr, repr_arrayexpr(args[0]))
+            return '({}({}))'.format(opr, repr_arrayexpr(args[0]))
         else:
+            opr = ' ' + opr + ' '
             return '({})'.format(opr.join([ repr_arrayexpr(x) for x in args ]))
+    elif isinstance(arrayexpr, numba.ir.Var):
+        name = arrayexpr.name
+        if name.startswith('$'):
+            return '\'%s\' (%s is a temporary variable)' % (2*(name,))
+        else:
+            return name
+    elif isinstance(arrayexpr, numba.ir.Const):
+        return repr(arrayexpr.value)
     else:
         return '_'
 
