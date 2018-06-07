@@ -587,7 +587,7 @@ class PreParforPass(object):
                                             block, i, new_func, self.typingctx, typs,
                                             self.typemap, self.calltypes, work_list)
                             call_table = get_call_table(new_blocks, topological_ordering=False)
-                            
+
                             # find the prange in the new blocks and record it for use in diagnostics
                             for call in call_table:
                                 for k, v in call.items():
@@ -644,6 +644,7 @@ class ParforPass(object):
         ir_utils._max_label = max(func_ir.blocks.keys())
         self.flags = flags
         self.fusion_info = defaultdict(list)
+        self.nested_fusion_info = defaultdict(list)
 
     def run(self):
         """run parfor conversion pass: replace Numpy calls
@@ -682,8 +683,8 @@ class ParforPass(object):
                 line = self.func_ir.loc
                 internal_name = '__numba_parfor_gufunc'
                 if not internal_name in name:
-                    msg = ("\nAttempting parallel loop fusion (combines loops with"
-                        " similar bounds) for function '%s', %s:")
+                    msg = ("\nAttempting parallel loop fusion (combines loops "
+                        "with similar properties) for function '%s', %s:")
                     print(msg % (name, line))
             self.func_ir._definitions = build_definitions(self.func_ir.blocks)
             self.array_analysis.equiv_sets = dict()
@@ -724,7 +725,7 @@ class ParforPass(object):
             # prepare for parallel lowering
             # add parfor params to parfors here since lowering is destructive
             # changing the IR after this is not allowed
-            parfor_ids = get_parfor_params(self.func_ir.blocks, self.options.fusion)
+            parfor_ids = get_parfor_params(self.func_ir.blocks, self.options.fusion, self.nested_fusion_info)
             if config.DEBUG_ARRAY_OPT_STATS:
                 name = self.func_ir.func_id.func_qualname
                 n_parfors = len(parfor_ids)
@@ -741,18 +742,22 @@ class ParforPass(object):
                 line = self.func_ir.loc
                 n_parfors = len(parfor_ids)
                 if n_parfors > 0:
-                    def dump_graph(a):
+                    def dump_graph(a, root_msg, node_msg):
                         vtx = set()
                         for v in a.values():
                             for x in v:
                                 vtx.add(x)
 
+                        # find roots
                         potential_roots = set(a.keys())
                         roots = potential_roots - vtx
 
-                        for x in range(max(vtx)):
+                        # populate rest of adjacency list
+                        for x in range(max(set(a.keys()).union(vtx)) + 1):
                             a[x] = a.get(x, [])
 
+                        # fold adjacency list into an actual list ordered
+                        # by vtx
                         l = []
                         for x in sorted(a.keys()):
                             l.append(a[x])
@@ -760,26 +765,39 @@ class ParforPass(object):
                         def print_graph(adj, roots):
                             fac = 3
                             def print_g(adj, root, depth):
-                                for k in adj[root]:
-                                    print(fac * depth * ' ' + '+--%s' % k)
-                                    if adj[k] != []:
-                                        print_g(adj, k, depth + 1)
+                                try:
+                                    for k in adj[root]:
+                                        print(fac * depth * ' ' + '+--%s %s' % (k, node_msg))
+                                        if adj[k] != []:
+                                            print_g(adj, k, depth + 1)
+                                except IndexError as e:
+                                    import pdb; pdb.set_trace()
+                                    pass
                             for r in roots:
-                                print('+--%s (fuses the following)' % r)
+                                print('+--%s %s' % (r, root_msg))
                                 print_g(l, r, 1)
                                 print("")
 
                         print_graph(l, roots)
 
                     if self.fusion_info != {}:
-                        print("\nFused loop graphic:")
-                        dump_graph(self.fusion_info)
+                        print("\nFused loop graphic for function %s, %s:" % (name, line))
+                        dump_graph(self.fusion_info, 'has the following loops fused into it:', '(fused)')
+                    if self.options.fusion:
+                        after_fusion = "Following the attempted fusion of parallel for-loops"
+                    else:
+                        after_fusion = "With fusion disabled"
 
-                    after_fusion = ("Following the fusion of parallel for-loops" if self.options.fusion
-                                    else "With fusion disabled")
-                    print(('\n{}, function \'{}\' (line {}) has '
+                    print(('\n{}, function \'{}\' ({}) has '
                            '{} parallel for-loop(s) (originating from loops labelled {}).').format(
                            after_fusion, name, line, n_parfors, ''.join(['#%s, ' % x for x in parfor_ids])))
+
+                    if self.nested_fusion_info != {}:
+                        print("\nNested parallel loop graphic for function %s, %s:" % (name, line))
+                        root_msg = 'is a parallel loop, containing:'
+                        node_msg = '--> rewritten as scalar loop'
+                        dump_graph(self.nested_fusion_info, root_msg, node_msg)
+                    pass
                 else:
                     print('Function {} has no Parfor.'.format(name))                
         return
@@ -2065,7 +2083,7 @@ def _find_first_parfor(body):
     return -1
 
 
-def get_parfor_params(blocks, options_fusion):
+def get_parfor_params(blocks, options_fusion, fusion_info):
     """find variables used in body of parfors from outside and save them.
     computed as live variables at entry of first block.
     """
@@ -2086,29 +2104,32 @@ def get_parfor_params(blocks, options_fusion):
             dummy_block.body = block.body[:i]
             before_defs = compute_use_defs({0: dummy_block}).defmap[0]
             pre_defs |= before_defs
-            parfor.params = get_parfor_params_inner(parfor, pre_defs, options_fusion)
+            parfor.params = get_parfor_params_inner(parfor, pre_defs, options_fusion, fusion_info)
             parfor_ids.add(parfor.id)
 
         pre_defs |= all_defs[label]
-
     return parfor_ids
 
 
-def get_parfor_params_inner(parfor, pre_defs, options_fusion):
+def get_parfor_params_inner(parfor, pre_defs, options_fusion, fusion_info):
 
     blocks = wrap_parfor_blocks(parfor)
     cfg = compute_cfg_from_blocks(blocks)
     usedefs = compute_use_defs(blocks)
     live_map = compute_live_map(cfg, blocks, usedefs.usemap, usedefs.defmap)
-    parfor_ids = get_parfor_params(blocks, options_fusion)
+    parfor_ids = get_parfor_params(blocks, options_fusion, fusion_info)
     if config.DEBUG_ARRAY_OPT_STATS or config.PARALLEL_DIAGNOSTICS:
         n_parfors = len(parfor_ids)
         if n_parfors > 0:
-             after_fusion = ("After fusion" if options_fusion
-                             else "With fusion disabled")
-             print(('{}, parallel for-loop {} has '
-                   'nested Parfor(s) #{}.').format(
-                  after_fusion, parfor.id, n_parfors, parfor_ids))
+            after_fusion = ("After fusion" if options_fusion
+                            else "With fusion disabled")
+            if config.DEBUG_ARRAY_OPT_STATS:
+                print(('{}, parallel for-loop {} has '
+                    'nested Parfor(s) #{}.').format(
+                    after_fusion, parfor.id, n_parfors, parfor_ids))
+            if config.PARALLEL_DIAGNOSTICS:
+                fusion_info[parfor.id] = list(parfor_ids)
+
     unwrap_parfor_blocks(parfor)
     keylist = sorted(live_map.keys())
     init_block = keylist[0]
@@ -2486,10 +2507,17 @@ def try_fuse(equiv_set, parfor1, parfor2):
     """try to fuse parfors and return a fused parfor, otherwise return None
     """
     dprint("try_fuse: trying to fuse \n", parfor1, "\n", parfor2)
+    print_diagnostics("Trying to fuse loops #%s and #%s:" % (parfor1.id, parfor2.id), 1)
 
     # fusion of parfors with different dimensions not supported yet
     if len(parfor1.loop_nests) != len(parfor2.loop_nests):
         dprint("try_fuse: parfors number of dimensions mismatch")
+        if config.PARALLEL_DIAGNOSTICS:
+            msg = "- fusion failed: number of loops mismatched, %s, %s."
+            fmt = "parallel loop #%s has a nest of %s loops"
+            l1 = fmt % (parfor1.id, len(parfor1.loop_nests))
+            l2 = fmt % (parfor2.id, len(parfor2.loop_nests))
+            print_diagnostics(msg % (l1, l2), 2)
         return None
 
     ndims = len(parfor1.loop_nests)
@@ -2505,11 +2533,17 @@ def try_fuse(equiv_set, parfor1, parfor2):
                 is_equiv(nest1.stop, nest2.stop) and
                 is_equiv(nest1.step, nest2.step)):
             dprint("try_fuse: parfor dimension correlation mismatch", i)
+            if config.PARALLEL_DIAGNOSTICS:
+                msg = "- fusion failed: loop dimension mismatched in axis %s. "
+                msg += "slice(%s, %s, %s) != " % (nest1.start, nest1.stop, nest1.step)
+                msg += "slice(%s, %s, %s)" % (nest2.start, nest2.stop, nest2.step)
+                print_diagnostics(msg % i, 2)
             return None
 
     # TODO: make sure parfor1's reduction output is not used in parfor2
     # only data parallel loops
     if has_cross_iter_dep(parfor1) or has_cross_iter_dep(parfor2):
+        import pdb; pdb.set_trace()
         dprint("try_fuse: parfor cross iteration dependency found")
         return None
 
@@ -2527,6 +2561,10 @@ def try_fuse(equiv_set, parfor1, parfor2):
 
     if not p1_body_defs.isdisjoint(p2_uses):
         dprint("try_fuse: parfor2 depends on parfor1 body")
+        if config.PARALLEL_DIAGNOSTICS:
+            msg = ("- fusion failed: parallel loop %s has a dependency on the "
+                  "body of parallel loop %s. ")
+            print_diagnostics(msg % (parfor2.id, parfor1.id), 2)
         return None
 
     return fuse_parfors_inner(parfor1, parfor2)
@@ -2564,9 +2602,13 @@ def fuse_parfors_inner(parfor1, parfor2):
     nameset = set(x.name for x in index_dict.values())
     remove_duplicate_definitions(parfor1.loop_body, nameset)
     parfor1.patterns.extend(parfor2.patterns)
-    if config.DEBUG_ARRAY_OPT_STATS or config.PARALLEL_DIAGNOSTICS:
-        print('  Parallel for-loop #{} is fused into for-loop #{}.'.format(
+    if config.DEBUG_ARRAY_OPT_STATS:
+        print('Parallel for-loop #{} is fused into for-loop #{}.'.format(
               parfor2.id, parfor1.id))
+    if config.PARALLEL_DIAGNOSTICS:
+        msg = '- fusion succeeded: parallel for-loop #{} is fused into for-loop #{}.'
+        msg = msg.format(parfor2.id, parfor1.id)
+        print_diagnostics(msg, 2)
 
     return parfor1
 
@@ -2616,9 +2658,12 @@ def has_cross_iter_dep(parfor):
 
 
 def dprint(*s):
-    if config.DEBUG_ARRAY_OPT == 1: # or config.PARALLEL_DIAGNOSTICS:
+    if config.DEBUG_ARRAY_OPT == 1:
         print(*s)
 
+def print_diagnostics(msg, indent = 0):
+    if config.PARALLEL_DIAGNOSTICS:
+        print(indent * 4 * ' ' + msg)
 
 def get_parfor_pattern_vars(parfor):
     """ get the variables used in parfor pattern information
