@@ -1,9 +1,11 @@
 from __future__ import print_function, division, absolute_import
 
 import ast
-from collections import defaultdict, OrderedDict
-import sys
 import copy
+from collections import defaultdict, OrderedDict
+import linecache
+import os
+import sys
 import numpy as np
 
 import llvmlite.llvmpy.core as lc
@@ -581,6 +583,30 @@ def _create_gufunc_for_parfor_body(
     start_block = gufunc_ir.blocks[min(gufunc_ir.blocks.keys())]
     start_block.body = start_block.body[:-1] + hoisted + [start_block.body[-1]]
     unwrap_loop_body(loop_body)
+
+    if config.PARALLEL_DIAGNOSTICS:
+        for inst in hoisted:
+            if isinstance(inst.value, ir.Expr):
+                try:
+                    attr = inst.value.attr
+                    if attr == 'empty':
+                        msg = ("The memory allocation derived from the "
+                               "instruction at %s is hoisted out of the "
+                               "parallel loop labelled #%s (it will be "
+                               "performed before the loop is executed and "
+                               "reused inside the loop):")
+                        loc = inst.loc
+                        print(msg % (loc, parfor.id))
+                        try:
+                            path = os.path.relpath(loc.filename)
+                        except ValueError:
+                            path = os.path.abspath(loc.filename)
+                        lines = linecache.getlines(path)
+                        if lines and loc.line:
+                            print("   Allocation:: " + lines[0 if loc.line < 2 else loc.line - 1].strip())
+                        print("    - numpy.empty() is used for the allocation.")
+                except (KeyError, AttributeError):
+                    pass
 
     if config.DEBUG_ARRAY_OPT:
         print("After hoisting")

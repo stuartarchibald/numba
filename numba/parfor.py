@@ -742,7 +742,9 @@ class ParforPass(object):
                 line = self.func_ir.loc
                 n_parfors = len(parfor_ids)
                 if n_parfors > 0:
-                    def dump_graph(a, root_msg, node_msg):
+                    def compute_graph_info(a):
+                        if a == {}:
+                            return [], None
                         vtx = set()
                         for v in a.values():
                             for x in v:
@@ -762,6 +764,9 @@ class ParforPass(object):
                         for x in sorted(a.keys()):
                             l.append(a[x])
 
+                        return l, roots
+
+                    def dump_graph(a, root_msg, node_msg):
                         def print_graph(adj, roots):
                             fac = 3
                             def print_g(adj, root, depth):
@@ -777,12 +782,15 @@ class ParforPass(object):
                                 print('+--%s %s' % (r, root_msg))
                                 print_g(l, r, 1)
                                 print("")
-
+                        l, roots = compute_graph_info(a)
                         print_graph(l, roots)
 
                     if self.fusion_info != {}:
-                        print("\nFused loop graphic for function %s, %s:" % (name, line))
+                        print("")
+                        print(("Fused loop summary for function %s, %s:" % (name, line)).center(80, '-') + "\n")
                         dump_graph(self.fusion_info, 'has the following loops fused into it:', '(fused)')
+                        fusion_adj, fusion_roots = compute_graph_info(self.fusion_info)
+
                     if self.options.fusion:
                         after_fusion = "Following the attempted fusion of parallel for-loops"
                     else:
@@ -791,13 +799,67 @@ class ParforPass(object):
                     print(('\n{}, function \'{}\' ({}) has '
                            '{} parallel for-loop(s) (originating from loops labelled {}).').format(
                            after_fusion, name, line, n_parfors, ''.join(['#%s, ' % x for x in parfor_ids])))
+                    print(80 * '-')
+                    print("")
 
                     if self.nested_fusion_info != {}:
-                        print("\nNested parallel loop graphic for function %s, %s:" % (name, line))
+                        print(("Nested parallel loop summary for function %s, %s:" % (name, line)).center(80, '-') + "\n")
                         root_msg = 'is a parallel loop, containing:'
                         node_msg = '--> rewritten as scalar loop'
                         dump_graph(self.nested_fusion_info, root_msg, node_msg)
-                    pass
+                        print(80 * '-')
+                        print("")
+
+                    def dump_graph(f, n):
+                        fadj, froots, frmsg, fnmsg = f
+                        nadj, nroots, nrmsg, nnmsg = n
+                        root_msg = 'root'
+                        node_msg = 'node'
+                        def print_graph(fadj, froots, nadj, nroots):
+                            fac = 3
+                            def print_g(fadj, froots, nadj, nroot, depth):
+                                try:
+                                    for k in nadj[nroot]:
+                                        print(fac * depth * ' ' + '+--%s %s' % (k, '(scalar)'))
+                                        if nadj[k] != []:
+                                            print_g(fadj, froots, nadj, k, depth + 1)
+                                        else:
+                                            for g in fadj[k]:
+                                                print(fac * (depth + 1) * ' ' + '+--%s %s' % (g, '(fused)'))
+                                except IndexError as e:
+                                    import pdb; pdb.set_trace()
+                                    pass
+                            # walk in nested space
+                            i = 0
+                            for r in nroots:
+                                if nadj[r] != []:
+                                    print("Parallel region %s:" % i)
+                                    i += 1
+                                    print('+--%s %s' % (r, '(parallel)'))
+                                    print_g(fadj, froots, nadj, r, 1)
+                                    print("")
+                        print_graph(fadj, froots, nadj, nroots)
+                    fadj, froots = compute_graph_info(self.fusion_info)
+                    f = (fadj, froots, 'has the following loops fused into it:', '(fused)')
+                    nadj, nroots = compute_graph_info(self.nested_fusion_info)
+
+                    if len(fadj) > len(nadj):
+                        lim = len(fadj)
+                        tmp = nadj
+                    else:
+                        lim = len(nadj)
+                        tmp = fadj
+                    for x in range(len(tmp), lim):
+                        tmp.append([])
+
+                    if nroots is not None:
+                        print(("Nested loop diagnostic summary for function %s, %s:" % (name, line)).center(80, '-') + "\n")
+                        n = (nadj, nroots, 'is a parallel loop, containing:', '--> rewritten as scalar loop')
+                        dump_graph(f, n)
+                        print(80 * '-')
+                        print("")
+
+
                 else:
                     print('Function {} has no Parfor.'.format(name))                
         return
