@@ -604,7 +604,7 @@ def _create_gufunc_for_parfor_body(
                         lines = linecache.getlines(path)
                         if lines and loc.line:
                             print("   Allocation:: " + lines[0 if loc.line < 2 else loc.line - 1].strip())
-                        print("    - numpy.empty() is used for the allocation.")
+                        print("    - numpy.empty() is used for the allocation.\n")
                 except (KeyError, AttributeError):
                     pass
 

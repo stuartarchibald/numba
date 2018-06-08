@@ -496,6 +496,7 @@ def _find_iter_range(func_ir, range_iter_var):
     """Find the iterator's actual range if it is either range(n), or range(m, n),
     otherwise return raise GuardException.
     """
+    import pdb; pdb.set_trace()
     debug_print = _make_debug_print("find_iter_range")
     range_iter_def = get_definition(func_ir, range_iter_var)
     debug_print("range_iter_var = ", range_iter_var, " def = ", range_iter_def)
@@ -641,6 +642,7 @@ def _inline_arraycall(func_ir, cfg, visited, loop, enable_prange=False):
     # then the index_var correlates to iterator index; otherwise we'll have to
     # define a new counter.
     range_def = guard(_find_iter_range, func_ir, iter_var)
+    import pdb; pdb.set_trace()
     index_var = ir.Var(scope, mk_unique_var("index"), loc)
     if range_def and range_def[0] == 0:
         # iterator starts with 0, index_var can just be iter_first_var
@@ -662,6 +664,10 @@ def _inline_arraycall(func_ir, cfg, visited, loop, enable_prange=False):
         if enable_prange and isinstance(range_func_def, ir.Global):
             range_func_def.name = 'internal_prange'
             range_func_def.value = internal_prange
+#(Pdb)  [callname, repl_func.__name__, func_def, block.body[i].loc]
+#[('sum', 'numpy'), 'sum_parallel_impl', getattr(value=$6.2.140, attr=sum), Loc(filename=examples/k-means/k-means_pa.py, line=22, col=None)]
+            #[('range', 'builtin'), 'prange', range_func_def, range_func_def.loc]
+
 
     else:
         len_func_var = ir.Var(scope, mk_unique_var("len_func"), loc)

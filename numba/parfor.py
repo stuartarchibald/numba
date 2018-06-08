@@ -810,52 +810,51 @@ class ParforPass(object):
                         print(80 * '-')
                         print("")
 
-                    def dump_graph(f, n):
-                        fadj, froots, frmsg, fnmsg = f
-                        nadj, nroots, nrmsg, nnmsg = n
-                        root_msg = 'root'
-                        node_msg = 'node'
-                        def print_graph(fadj, froots, nadj, nroots):
-                            fac = 3
-                            def print_g(fadj, froots, nadj, nroot, depth):
-                                try:
-                                    for k in nadj[nroot]:
-                                        print(fac * depth * ' ' + '+--%s %s' % (k, '(scalar)'))
-                                        if nadj[k] != []:
-                                            print_g(fadj, froots, nadj, k, depth + 1)
-                                        else:
-                                            for g in fadj[k]:
-                                                print(fac * (depth + 1) * ' ' + '+--%s %s' % (g, '(fused)'))
-                                except IndexError as e:
-                                    import pdb; pdb.set_trace()
-                                    pass
-                            # walk in nested space
-                            i = 0
-                            for r in nroots:
-                                if nadj[r] != []:
-                                    print("Parallel region %s:" % i)
-                                    i += 1
-                                    print('+--%s %s' % (r, '(parallel)'))
-                                    print_g(fadj, froots, nadj, r, 1)
-                                    print("")
-                        print_graph(fadj, froots, nadj, nroots)
-                    fadj, froots = compute_graph_info(self.fusion_info)
-                    f = (fadj, froots, 'has the following loops fused into it:', '(fused)')
+                    # Compute and print the combined nest and fuse graph is appropriate
                     nadj, nroots = compute_graph_info(self.nested_fusion_info)
-
-                    if len(fadj) > len(nadj):
-                        lim = len(fadj)
-                        tmp = nadj
-                    else:
-                        lim = len(nadj)
-                        tmp = fadj
-                    for x in range(len(tmp), lim):
-                        tmp.append([])
-
                     if nroots is not None:
+
+                        fadj, froots = compute_graph_info(self.fusion_info)
+                        def dump_graph(fadj, froots, nadj, nroots):
+                            #fadj, froots = f
+                            #nadj, nroots = n
+                            def print_graph(fadj, froots, nadj, nroots):
+                                fac = 3
+                                def print_g(fadj, froots, nadj, nroot, depth):
+                                    try:
+                                        for k in nadj[nroot]:
+                                            print(fac * depth * ' ' + '+--%s %s' % (k, '(scalar)'))
+                                            if nadj[k] != []:
+                                                print_g(fadj, froots, nadj, k, depth + 1)
+                                            else:
+                                                for g in fadj[k]:
+                                                    print(fac * (depth + 1) * ' ' + '+--%s %s' % (g, '(fused)'))
+                                    except IndexError as e:
+                                        import pdb; pdb.set_trace()
+                                        pass
+                                # walk in nested space
+                                i = 0
+                                for r in nroots:
+                                    if nadj[r] != []:
+                                        print("Parallel region %s:" % i)
+                                        i += 1
+                                        print('+--%s %s' % (r, '(parallel)'))
+                                        print_g(fadj, froots, nadj, r, 1)
+                                        print("")
+                            print_graph(fadj, froots, nadj, nroots)
+
+                        # ensure adjacency lists are the same size for both sets of info
+                        if len(fadj) > len(nadj):
+                            lim = len(fadj)
+                            tmp = nadj
+                        else:
+                            lim = len(nadj)
+                            tmp = fadj
+                        for x in range(len(tmp), lim):
+                            tmp.append([])
+
                         print(("Nested loop diagnostic summary for function %s, %s:" % (name, line)).center(80, '-') + "\n")
-                        n = (nadj, nroots, 'is a parallel loop, containing:', '--> rewritten as scalar loop')
-                        dump_graph(f, n)
+                        dump_graph(fadj, froots , nadj, nroots)
                         print(80 * '-')
                         print("")
 
@@ -1360,7 +1359,14 @@ class ParforPass(object):
         assert len(call) > 0
         kind = 'user', ''
         if call[0] == 'internal_prange' or call[0] == internal_prange:
-            kind = 'internal', (self.swapped_fns[func_var][0], self.swapped_fns[func_var][-1])
+            try:
+                kind = 'internal', (self.swapped_fns[func_var][0], self.swapped_fns[func_var][-1])
+            except KeyError as e:
+                # internal prange isn't from a swapped function, chances are a parallel closure
+                # inlining did it
+                kind = 'internal', (('closure', 'array comprehension'), 1)
+                import pdb; pdb.set_trace()
+                pass
         elif call[0] == 'pndindex' or call[0] == pndindex:
             kind = 'pndindex', ''
         return kind
