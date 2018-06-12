@@ -44,9 +44,10 @@ class InlineClosureCallPass(object):
     closures, and inlines the body of the closure function to the call site.
     """
 
-    def __init__(self, func_ir, parallel_options):
+    def __init__(self, func_ir, parallel_options, swapped):
         self.func_ir = func_ir
         self.parallel_options = parallel_options
+        self.swapped = swapped
         self._processed_stencils = []
 
     def run(self):
@@ -95,7 +96,7 @@ class InlineClosureCallPass(object):
             for k, s in sorted(sized_loops, key=lambda tup: tup[1], reverse=True):
                 visited.append(k)
                 if guard(_inline_arraycall, self.func_ir, cfg, visited, loops[k],
-                         self.parallel_options.comprehension):
+                         self.swapped, self.parallel_options.comprehension):
                     modified = True
             if modified:
                 _fix_nested_array(self.func_ir)
@@ -492,11 +493,10 @@ def _find_arraycall(func_ir, block):
     return list_var, array_stmt_index, array_kws
 
 
-def _find_iter_range(func_ir, range_iter_var):
+def _find_iter_range(func_ir, range_iter_var, swapped):
     """Find the iterator's actual range if it is either range(n), or range(m, n),
     otherwise return raise GuardException.
     """
-    import pdb; pdb.set_trace()
     debug_print = _make_debug_print("find_iter_range")
     range_iter_def = get_definition(func_ir, range_iter_var)
     debug_print("range_iter_var = ", range_iter_var, " def = ", range_iter_def)
@@ -510,17 +510,23 @@ def _find_iter_range(func_ir, range_iter_var):
     debug_print("func_var = ", func_var, " func_def = ", func_def)
     require(isinstance(func_def, ir.Global) and func_def.value == range)
     nargs = len(range_def.args)
+    swapping = [('"array comprehension"', 'closure of'), range_def.func.loc]
+    #[callname, repl_func.__name__, func_def, block.body[i].loc]
     if nargs == 1:
+        if config.PARALLEL_DIAGNOSTICS:
+            swapped[range_def.func.name] = swapping
         stop = get_definition(func_ir, range_def.args[0], lhs_only=True)
         return (0, range_def.args[0], func_def)
     elif nargs == 2:
+        if config.PARALLEL_DIAGNOSTICS:
+            swapped[range_def.func.name] = swapping
         start = get_definition(func_ir, range_def.args[0], lhs_only=True)
         stop = get_definition(func_ir, range_def.args[1], lhs_only=True)
         return (start, stop, func_def)
     else:
         raise GuardException
 
-def _inline_arraycall(func_ir, cfg, visited, loop, enable_prange=False):
+def _inline_arraycall(func_ir, cfg, visited, loop, swapped, enable_prange=False):
     """Look for array(list) call in the exit block of a given loop, and turn list operations into
     array operations in the loop if the following conditions are met:
       1. The exit block contains an array call on the list;
@@ -641,8 +647,7 @@ def _inline_arraycall(func_ir, cfg, visited, loop, enable_prange=False):
     # If the range happens to be single step ranges like range(n), or range(m, n),
     # then the index_var correlates to iterator index; otherwise we'll have to
     # define a new counter.
-    range_def = guard(_find_iter_range, func_ir, iter_var)
-    import pdb; pdb.set_trace()
+    range_def = guard(_find_iter_range, func_ir, iter_var, swapped)
     index_var = ir.Var(scope, mk_unique_var("index"), loc)
     if range_def and range_def[0] == 0:
         # iterator starts with 0, index_var can just be iter_first_var

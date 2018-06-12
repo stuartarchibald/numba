@@ -770,14 +770,10 @@ class ParforPass(object):
                         def print_graph(adj, roots):
                             fac = 3
                             def print_g(adj, root, depth):
-                                try:
-                                    for k in adj[root]:
-                                        print(fac * depth * ' ' + '+--%s %s' % (k, node_msg))
-                                        if adj[k] != []:
-                                            print_g(adj, k, depth + 1)
-                                except IndexError as e:
-                                    import pdb; pdb.set_trace()
-                                    pass
+                                for k in adj[root]:
+                                    print(fac * depth * ' ' + '+--%s %s' % (k, node_msg))
+                                    if adj[k] != []:
+                                        print_g(adj, k, depth + 1)
                             for r in roots:
                                 print('+--%s %s' % (r, root_msg))
                                 print_g(l, r, 1)
@@ -805,7 +801,7 @@ class ParforPass(object):
                     if self.nested_fusion_info != {}:
                         print(("Nested parallel loop summary for function %s, %s:" % (name, line)).center(80, '-') + "\n")
                         root_msg = 'is a parallel loop, containing:'
-                        node_msg = '--> rewritten as scalar loop'
+                        node_msg = '--> rewritten as serial loop'
                         dump_graph(self.nested_fusion_info, root_msg, node_msg)
                         print(80 * '-')
                         print("")
@@ -816,22 +812,16 @@ class ParforPass(object):
 
                         fadj, froots = compute_graph_info(self.fusion_info)
                         def dump_graph(fadj, froots, nadj, nroots):
-                            #fadj, froots = f
-                            #nadj, nroots = n
                             def print_graph(fadj, froots, nadj, nroots):
                                 fac = 3
                                 def print_g(fadj, froots, nadj, nroot, depth):
-                                    try:
-                                        for k in nadj[nroot]:
-                                            print(fac * depth * ' ' + '+--%s %s' % (k, '(scalar)'))
-                                            if nadj[k] != []:
-                                                print_g(fadj, froots, nadj, k, depth + 1)
-                                            else:
-                                                for g in fadj[k]:
-                                                    print(fac * (depth + 1) * ' ' + '+--%s %s' % (g, '(fused)'))
-                                    except IndexError as e:
-                                        import pdb; pdb.set_trace()
-                                        pass
+                                    for k in nadj[nroot]:
+                                        print(fac * depth * ' ' + '+--%s %s' % (k, '(serial)'))
+                                        if nadj[k] != []:
+                                            print_g(fadj, froots, nadj, k, depth + 1)
+                                        else:
+                                            for g in fadj[k]:
+                                                print(fac * (depth + 1) * ' ' + '+--%s %s' % (g, '(fused)'))
                                 # walk in nested space
                                 i = 0
                                 for r in nroots:
@@ -1359,14 +1349,7 @@ class ParforPass(object):
         assert len(call) > 0
         kind = 'user', ''
         if call[0] == 'internal_prange' or call[0] == internal_prange:
-            try:
-                kind = 'internal', (self.swapped_fns[func_var][0], self.swapped_fns[func_var][-1])
-            except KeyError as e:
-                # internal prange isn't from a swapped function, chances are a parallel closure
-                # inlining did it
-                kind = 'internal', (('closure', 'array comprehension'), 1)
-                import pdb; pdb.set_trace()
-                pass
+            kind = 'internal', (self.swapped_fns[func_var][0], self.swapped_fns[func_var][-1])
         elif call[0] == 'pndindex' or call[0] == pndindex:
             kind = 'pndindex', ''
         return kind
@@ -1445,7 +1428,7 @@ class ParforPass(object):
                 index_var,
                 index_vars,
                 avail_vars))
-        
+
         if config.PARALLEL_DIAGNOSTICS:
             pat = ('array expression {}'.format(repr_arrayexpr(arrayexpr.expr)),)
         else:
@@ -2611,8 +2594,11 @@ def try_fuse(equiv_set, parfor1, parfor2):
     # TODO: make sure parfor1's reduction output is not used in parfor2
     # only data parallel loops
     if has_cross_iter_dep(parfor1) or has_cross_iter_dep(parfor2):
-        import pdb; pdb.set_trace()
         dprint("try_fuse: parfor cross iteration dependency found")
+        if config.PARALLEL_DIAGNOSTICS:
+            msg = ("- fusion failed: cross iteration dependency found "
+                   "between loops #%s and #%s")
+            print_diagnostics(msg % (parfor1.id, parfor2.id), 2)
         return None
 
     # find parfor1's defs, only body is considered since init_block will run

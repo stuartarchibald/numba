@@ -553,7 +553,8 @@ class BasePipeline(object):
         # Ensure we have an IR and type information.
         assert self.func_ir
         inline_pass = InlineClosureCallPass(self.func_ir,
-                                            self.flags.auto_parallel)
+                                            self.flags.auto_parallel,
+                                            self.parfor_replaced_fns)
         inline_pass.run()
         # Remove all Dels, and re-run postproc
         post_proc = postproc.PostProcessor(self.func_ir)
