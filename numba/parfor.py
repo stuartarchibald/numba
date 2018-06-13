@@ -669,6 +669,7 @@ class ParforPass(object):
            self._convert_loop(self.func_ir.blocks)
 
         if config.PARALLEL_DIAGNOSTICS:
+        # define some functions for later use
             def count_nested_parfors(parfor):
                 blocks = wrap_parfor_blocks(parfor)
                 count = count_parfors(blocks)
@@ -676,6 +677,9 @@ class ParforPass(object):
                 return count
 
             def count_parfors(blocks):
+                """
+                Counts the number of Parfors in blocks (including nested)
+                """
                 count = 0
                 for label, blk in blocks.items():
                     for stmt in blk.body:
@@ -684,8 +688,37 @@ class ParforPass(object):
                             count += 1
                 return count
 
-            count = count_parfors(self.func_ir.blocks)
+            def compute_graph_info(a):
+                """
+                compute adjacency list of the fused loops
+                and find the roots in of the lists
+                """
+                if a == {}:
+                    return [], None
 
+                vtx = set()
+                for v in a.values():
+                    for x in v:
+                        vtx.add(x)
+
+                # find roots
+                potential_roots = set(a.keys())
+                roots = potential_roots - vtx
+
+                # populate rest of adjacency list
+                for x in range(max(set(a.keys()).union(vtx)) + 1):
+                    a[x] = a.get(x, [])
+
+                # fold adjacency list into an actual list ordered
+                # by vtx
+                l = []
+                for x in sorted(a.keys()):
+                    l.append(a[x])
+
+                return l, roots
+
+        if config.PARALLEL_DIAGNOSTICS:
+            count = count_parfors(self.func_ir.blocks)
             print("Found %s parallel loops." % count)
             print('-' * 80)
 
@@ -710,6 +743,7 @@ class ParforPass(object):
                     msg = ("\nAttempting parallel loop fusion (combines loops "
                         "with similar properties) for function '%s', %s:")
                     print(msg % (name, line))
+
             self.func_ir._definitions = build_definitions(self.func_ir.blocks)
             self.array_analysis.equiv_sets = dict()
             self.array_analysis.run(self.func_ir.blocks)
@@ -770,35 +804,7 @@ class ParforPass(object):
                 # if there are some parfors, print information about them!
                 if n_parfors > 0:
 
-                    def compute_graph_info(a):
-                        """
-                        compute adjacency list of the fused loops
-                        and find the roots in of the lists
-                        """
-                        if a == {}:
-                            return [], None
-                        vtx = set()
-                        for v in a.values():
-                            for x in v:
-                                vtx.add(x)
-
-                        # find roots
-                        potential_roots = set(a.keys())
-                        roots = potential_roots - vtx
-
-                        # populate rest of adjacency list
-                        for x in range(max(set(a.keys()).union(vtx)) + 1):
-                            a[x] = a.get(x, [])
-
-                        # fold adjacency list into an actual list ordered
-                        # by vtx
-                        l = []
-                        for x in sorted(a.keys()):
-                            l.append(a[x])
-
-                        return l, roots
-
-                    def dump_graph(a, root_msg, node_msg):
+                    def dump_graph_indented(a, root_msg, node_msg):
                         def print_graph(adj, roots):
                             fac = 3
                             def print_g(adj, root, depth):
@@ -816,7 +822,7 @@ class ParforPass(object):
                     if self.fusion_info != {}:
                         print("")
                         print(("Fused loop summary for function %s, %s:" % (name, line)).center(80, '-') + "\n")
-                        dump_graph(self.fusion_info, 'has the following loops fused into it:', '(fused)')
+                        dump_graph_indented(self.fusion_info, 'has the following loops fused into it:', '(fused)')
                         fusion_adj, fusion_roots = compute_graph_info(self.fusion_info)
 
                     if self.options.fusion:
@@ -834,7 +840,7 @@ class ParforPass(object):
                         print(("Nested parallel loop summary for function %s, %s:" % (name, line)).center(80, '-') + "\n")
                         root_msg = 'is a parallel loop, containing:'
                         node_msg = '--> rewritten as serial loop'
-                        dump_graph(self.nested_fusion_info, root_msg, node_msg)
+                        dump_graph_indented(self.nested_fusion_info, root_msg, node_msg)
                         print(80 * '-')
                         print("")
 
