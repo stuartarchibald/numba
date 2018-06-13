@@ -650,6 +650,8 @@ class ParforPass(object):
         """run parfor conversion pass: replace Numpy calls
         with Parfors when possible and optimize the IR."""
         # run array analysis, a pre-requisite for parfor translation
+        if config.PARALLEL_DIAGNOSTICS:
+            print('Looking for parallel loops'.center(80, '-'))
         remove_dels(self.func_ir.blocks)
         self.array_analysis.run(self.func_ir.blocks)
         # run stencil translation to parfor
@@ -665,6 +667,28 @@ class ParforPass(object):
             self._convert_reduce(self.func_ir.blocks)
         if self.options.prange:
            self._convert_loop(self.func_ir.blocks)
+
+        if config.PARALLEL_DIAGNOSTICS:
+            def count_nested_parfors(parfor):
+                blocks = wrap_parfor_blocks(parfor)
+                count = count_parfors(blocks)
+                unwrap_parfor_blocks(parfor)
+                return count
+
+            def count_parfors(blocks):
+                count = 0
+                for label, blk in blocks.items():
+                    for stmt in blk.body:
+                        if isinstance(stmt, Parfor):
+                            count += count_nested_parfors(stmt)
+                            count += 1
+                return count
+
+            count = count_parfors(self.func_ir.blocks)
+
+            print("Found %s parallel loops." % count)
+            print('-' * 80)
+
         dprint_func_ir(self.func_ir, "after parfor pass")
 
         # simplify CFG of parfor body loops since nested parfors with extra
@@ -737,12 +761,20 @@ class ParforPass(object):
                            after_fusion, name, n_parfors, parfor_ids))
                 else:
                     print('Function {} has no Parfor.'.format(name))
+
             if config.PARALLEL_DIAGNOSTICS:
                 name = self.func_ir.func_id.func_qualname
                 line = self.func_ir.loc
                 n_parfors = len(parfor_ids)
+
+                # if there are some parfors, print information about them!
                 if n_parfors > 0:
+
                     def compute_graph_info(a):
+                        """
+                        compute adjacency list of the fused loops
+                        and find the roots in of the lists
+                        """
                         if a == {}:
                             return [], None
                         vtx = set()
@@ -806,22 +838,20 @@ class ParforPass(object):
                         print(80 * '-')
                         print("")
 
-                    # Compute and print the combined nest and fuse graph is appropriate
+                    # Compute and print the combined nest and fuse graph if appropriate
                     nadj, nroots = compute_graph_info(self.nested_fusion_info)
                     if nroots is not None:
-
-                        fadj, froots = compute_graph_info(self.fusion_info)
-                        def dump_graph(fadj, froots, nadj, nroots):
+                        def dump_graph_before_fuse(fadj, froots, nadj, nroots):
                             def print_graph(fadj, froots, nadj, nroots):
                                 fac = 3
                                 def print_g(fadj, froots, nadj, nroot, depth):
                                     for k in nadj[nroot]:
-                                        print(fac * depth * ' ' + '+--%s %s' % (k, '(serial)'))
+                                        print(fac * depth * ' ' + '+--%s %s' % (k, '(parallel)'))
                                         if nadj[k] != []:
                                             print_g(fadj, froots, nadj, k, depth + 1)
                                         else:
                                             for g in fadj[k]:
-                                                print(fac * (depth + 1) * ' ' + '+--%s %s' % (g, '(fused)'))
+                                                print(fac * depth * ' ' + '+--%s %s' % (g, '(parallel)'))
                                 # walk in nested space
                                 i = 0
                                 for r in nroots:
@@ -833,7 +863,50 @@ class ParforPass(object):
                                         print("")
                             print_graph(fadj, froots, nadj, nroots)
 
+                        def dump_graph(fadj, froots, nadj, nroots):
+                            def print_graph(fadj, froots, nadj, nroots):
+                                fac = 3
+                                def print_g(fadj, froots, nadj, nroot, depth):
+                                    for k in nadj[nroot]:
+                                        msg = fac * depth * ' ' + '+--%s %s' % (k, '(serial')
+                                        if nadj[k] == []:
+                                                if fadj[k] != []:
+                                                    msg += ", fused with loop(s): "
+                                                    msg += ', '.join([str(x) for x in fadj[k]])
+                                                msg += ')'
+                                                print(msg)
+                                        else:
+                                            print(msg + ')')
+                                            print_g(fadj, froots, nadj, k, depth + 1)
+
+                                # walk in nested space
+                                i = 0
+                                for r in nroots:
+                                    if nadj[r] != []:
+                                        print("Parallel region %s:" % i)
+                                        i += 1
+                                        print('+--%s %s' % (r, '(parallel)'))
+                                        print_g(fadj, froots, nadj, r, 1)
+                                        print("")
+                            print_graph(fadj, froots, nadj, nroots)
+
+                        def get_stats(fadj, froots, nadj, nroot):
+                            def print_g(fadj, froots, nadj, nroot, nfused, nserial):
+                                for k in nadj[nroot]:
+                                    nserial += 1
+                                    if nadj[k] == []:
+                                        nfused += len(fadj[k])
+                                    else:
+                                        nf, ns = print_g(fadj, froots, nadj, k, nfused, nserial)
+                                        nfused +=nf
+                                        nserial = ns
+                                return nfused, nserial
+                            nfused, nserial = print_g(fadj, froots, nadj, nroot, 0, 0)
+                            return nfused, nserial
+
+
                         # ensure adjacency lists are the same size for both sets of info
+                        fadj, froots = compute_graph_info(self.fusion_info)
                         if len(fadj) > len(nadj):
                             lim = len(fadj)
                             tmp = nadj
@@ -844,7 +917,22 @@ class ParforPass(object):
                             tmp.append([])
 
                         print(("Nested loop diagnostic summary for function %s, %s:" % (name, line)).center(80, '-') + "\n")
+                        print("Before fusion:")
+                        dump_graph_before_fuse(fadj, froots , nadj, nroots)
+                        print("After fusion:")
                         dump_graph(fadj, froots , nadj, nroots)
+
+                        i = 0
+                        for r in nroots:
+                            if nadj[r] != []:
+                                nfused, nserial = get_stats(fadj, froots, nadj, r)
+                                msg = ('Parallel region %s (loop #%s) had %s '
+                                    'loop(s) fused and %s loop(s) '
+                                    'serialized as part of the larger '
+                                    'parallel loop (#%s).')
+                                print(msg % (i, r, nfused, nserial, r))
+                                i += 1
+                        print("")
                         print(80 * '-')
                         print("")
 
