@@ -646,12 +646,24 @@ class ParforPass(object):
         self.fusion_info = defaultdict(list)
         self.nested_fusion_info = defaultdict(list)
 
+        # used to identify "internal" parfor functions
+        self.internal_name = '__numba_parfor_gufunc'
+
+
     def run(self):
         """run parfor conversion pass: replace Numpy calls
         with Parfors when possible and optimize the IR."""
         # run array analysis, a pre-requisite for parfor translation
         if config.PARALLEL_DIAGNOSTICS:
+            name = self.func_ir.func_id.func_qualname
+            line = self.func_ir.loc
+            if self.internal_name in name:
+                purpose = 'Internal parallel functions '
+            else:
+                purpose = ' Function %s, %s ' % (name, line)
+            print((" Parallel Accelerator Optimizing: %s " % purpose).center(80, '='))
             print('Looking for parallel loops'.center(80, '-'))
+
         remove_dels(self.func_ir.blocks)
         self.array_analysis.run(self.func_ir.blocks)
         # run stencil translation to parfor
@@ -757,11 +769,12 @@ class ParforPass(object):
             if config.PARALLEL_DIAGNOSTICS:
                 name = self.func_ir.func_id.func_qualname
                 line = self.func_ir.loc
-                internal_name = '__numba_parfor_gufunc'
-                if not internal_name in name:
+                if not self.internal_name in name:
                     msg = ("\nAttempting parallel loop fusion (combines loops "
                         "with similar properties) for function '%s', %s:")
                     print(msg % (name, line))
+                else:
+                    print("All parallel loops found are internal loops.")
 
             self.func_ir._definitions = build_definitions(self.func_ir.blocks)
             self.array_analysis.equiv_sets = dict()
@@ -866,14 +879,15 @@ class ParforPass(object):
                     # Compute and print the combined nest and fuse graph if appropriate
                     nadj, nroots = compute_graph_info(self.nested_fusion_info)
                     if nroots is not None:
-                        def dump_graph_before_fuse(fadj, froots, nadj, nroots):
-                            def print_graph(fadj, froots, nadj, nroots):
+
+                        def dump_graph_before_fuse(fadj, nadj, nroots):
+                            def print_graph(fadj, nadj, nroots):
                                 fac = 3
-                                def print_g(fadj, froots, nadj, nroot, depth):
+                                def print_g(fadj, nadj, nroot, depth):
                                     for k in nadj[nroot]:
                                         print(fac * depth * ' ' + '+--%s %s' % (k, '(parallel)'))
                                         if nadj[k] != []:
-                                            print_g(fadj, froots, nadj, k, depth + 1)
+                                            print_g(fadj, nadj, k, depth + 1)
                                         else:
                                             for g in fadj[k]:
                                                 print(fac * depth * ' ' + '+--%s %s' % (g, '(parallel)'))
@@ -884,14 +898,14 @@ class ParforPass(object):
                                         print("Parallel region %s:" % i)
                                         i += 1
                                         print('+--%s %s' % (r, '(parallel)'))
-                                        print_g(fadj, froots, nadj, r, 1)
+                                        print_g(fadj, nadj, r, 1)
                                         print("")
-                            print_graph(fadj, froots, nadj, nroots)
+                            print_graph(fadj, nadj, nroots)
 
-                        def dump_graph(fadj, froots, nadj, nroots):
-                            def print_graph(fadj, froots, nadj, nroots):
+                        def dump_graph(fadj, nadj, nroots):
+                            def print_graph(fadj, nadj, nroots):
                                 fac = 3
-                                def print_g(fadj, froots, nadj, nroot, depth):
+                                def print_g(fadj, nadj, nroot, depth):
                                     for k in nadj[nroot]:
                                         msg = fac * depth * ' ' + '+--%s %s' % (k, '(serial')
                                         if nadj[k] == []:
@@ -902,7 +916,7 @@ class ParforPass(object):
                                                 print(msg)
                                         else:
                                             print(msg + ')')
-                                            print_g(fadj, froots, nadj, k, depth + 1)
+                                            print_g(fadj, nadj, k, depth + 1)
 
                                 # walk in nested space
                                 i = 0
@@ -911,9 +925,9 @@ class ParforPass(object):
                                         print("Parallel region %s:" % i)
                                         i += 1
                                         print('+--%s %s' % (r, '(parallel)'))
-                                        print_g(fadj, froots, nadj, r, 1)
+                                        print_g(fadj, nadj, r, 1)
                                         print("")
-                            print_graph(fadj, froots, nadj, nroots)
+                            print_graph(fadj, nadj, nroots)
 
                         # ensure adjacency lists are the same size for both sets of info
                         # (nests and fusion may not traverse the same space, for 
@@ -930,9 +944,9 @@ class ParforPass(object):
 
                         print(("Nested loop diagnostic summary for function %s, %s:" % (name, line)).center(80, '-') + "\n")
                         print("Before fusion:")
-                        dump_graph_before_fuse(fadj, froots , nadj, nroots)
+                        dump_graph_before_fuse(fadj, nadj, nroots)
                         print("After fusion:")
-                        dump_graph(fadj, froots , nadj, nroots)
+                        dump_graph(fadj, nadj, nroots)
 
                         i = 0
                         for r in nroots:
