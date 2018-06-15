@@ -717,6 +717,25 @@ class ParforPass(object):
 
                 return l, roots
 
+            def get_stats(fadj, nadj, root):
+                """
+                Computes the number of fused and serialized loops
+                based on a fusion adjacency list `fadj` and a nested
+                parfors adjacency list `nadj` for the root, `root`
+                """
+                def count_root(fadj, nadj, root, nfused, nserial):
+                    for k in nadj[root]:
+                        nserial += 1
+                        if nadj[k] == []:
+                            nfused += len(fadj[k])
+                        else:
+                            nf, ns = count_root(fadj, nadj, k, nfused, nserial)
+                            nfused += nf
+                            nserial = ns
+                    return nfused, nserial
+                nfused, nserial = count_root(fadj, nadj, root, 0, 0)
+                return nfused, nserial
+
         if config.PARALLEL_DIAGNOSTICS:
             count = count_parfors(self.func_ir.blocks)
             print("Found %s parallel loops." % count)
@@ -896,22 +915,9 @@ class ParforPass(object):
                                         print("")
                             print_graph(fadj, froots, nadj, nroots)
 
-                        def get_stats(fadj, froots, nadj, nroot):
-                            def print_g(fadj, froots, nadj, nroot, nfused, nserial):
-                                for k in nadj[nroot]:
-                                    nserial += 1
-                                    if nadj[k] == []:
-                                        nfused += len(fadj[k])
-                                    else:
-                                        nf, ns = print_g(fadj, froots, nadj, k, nfused, nserial)
-                                        nfused +=nf
-                                        nserial = ns
-                                return nfused, nserial
-                            nfused, nserial = print_g(fadj, froots, nadj, nroot, 0, 0)
-                            return nfused, nserial
-
-
                         # ensure adjacency lists are the same size for both sets of info
+                        # (nests and fusion may not traverse the same space, for 
+                        # convenience [] is used as a condition to halt recursion)
                         fadj, froots = compute_graph_info(self.fusion_info)
                         if len(fadj) > len(nadj):
                             lim = len(fadj)
@@ -931,7 +937,7 @@ class ParforPass(object):
                         i = 0
                         for r in nroots:
                             if nadj[r] != []:
-                                nfused, nserial = get_stats(fadj, froots, nadj, r)
+                                nfused, nserial = get_stats(fadj, nadj, r)
                                 msg = ('Parallel region %s (loop #%s) had %s '
                                     'loop(s) fused and %s loop(s) '
                                     'serialized as part of the larger '
