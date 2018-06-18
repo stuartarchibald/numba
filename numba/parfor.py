@@ -15,6 +15,7 @@ https://github.com/IntelLabs/ParallelAccelerator.jl
 from __future__ import print_function, division, absolute_import
 import types as pytypes  # avoid confusion with numba.types
 import sys, math
+import textwrap
 from functools import reduce
 from collections import defaultdict, OrderedDict
 from contextlib import contextmanager
@@ -85,6 +86,12 @@ import copy
 import numpy
 import numpy as np
 # circular dependency: import numba.npyufunc.dufunc.DUFunc
+
+# wrapped pretty print
+_txtwrapper = textwrap.TextWrapper(width=80, drop_whitespace=False)
+def print_wrapped(x):
+    for l in x.splitlines():
+        [print(y) for y in _txtwrapper.wrap(l)]
 
 sequential_parfor_lowering = False
 
@@ -467,9 +474,8 @@ class Parfor(ir.Expr, ir.Stmt):
                     pattern = "user defined prange"
                 else:
                     assert 0
-            fmt = 'A parallel for-loop (labelled as #{}) is produced from: \'{}\' at {}'
-            print(fmt.format(
-                  self.id, pattern, loc))
+            fmt = 'Parallel for-loop #%s: is produced from %s:\n    %s\n \n'
+            print_wrapped(fmt % (self.id, loc, pattern))
 
     def __repr__(self):
         return "id=" + str(self.id) + repr(self.loop_nests) + \
@@ -661,8 +667,12 @@ class ParforPass(object):
                 purpose = 'Internal parallel functions '
             else:
                 purpose = ' Function %s, %s ' % (name, line)
-            print((" Parallel Accelerator Optimizing: %s " % purpose).center(80, '='))
-            print('Looking for parallel loops'.center(80, '-'))
+            print_wrapped('\n ')
+            print_wrapped(80 * "=")
+            print_wrapped((" Parallel Accelerator Optimizing: %s " % purpose).center(80, '='))
+            print_wrapped(80 * "=")
+            print_wrapped("")
+            print_wrapped('Looking for parallel loops'.center(80, '-'))
 
         remove_dels(self.func_ir.blocks)
         self.array_analysis.run(self.func_ir.blocks)
@@ -681,7 +691,9 @@ class ParforPass(object):
            self._convert_loop(self.func_ir.blocks)
 
         if config.PARALLEL_DIAGNOSTICS:
-        # define some functions for later use
+            sword = '+--'
+
+            # define some functions for later use
             def count_nested_parfors(parfor):
                 blocks = wrap_parfor_blocks(parfor)
                 count = count_parfors(blocks)
@@ -748,10 +760,22 @@ class ParforPass(object):
                 nfused, nserial = count_root(fadj, nadj, root, 0, 0)
                 return nfused, nserial
 
+            def reachable_nodes(adj, root):
+                """
+                returns a list of nodes reachable in an adjacency list from a
+                specified root
+                """
+                fusers = []
+                fusers.extend(adj[root])
+                for k in adj[root]:
+                    if adj[k] != []:
+                        fusers.extend(reachable_nodes(adj, k))
+                return fusers
+
         if config.PARALLEL_DIAGNOSTICS:
             count = count_parfors(self.func_ir.blocks)
-            print("Found %s parallel loops." % count)
-            print('-' * 80)
+            print_wrapped("\nFound %s parallel loops." % count)
+            print_wrapped('-' * 80)
 
         dprint_func_ir(self.func_ir, "after parfor pass")
 
@@ -766,15 +790,13 @@ class ParforPass(object):
         simplify(self.func_ir, self.typemap, self.calltypes)
 
         if self.options.fusion:
-            if config.PARALLEL_DIAGNOSTICS:
+            if config.PARALLEL_DIAGNOSTICS and not sequential_parfor_lowering:
                 name = self.func_ir.func_id.func_qualname
                 line = self.func_ir.loc
-                if not self.internal_name in name:
-                    msg = ("\nAttempting parallel loop fusion (combines loops "
-                        "with similar properties) for function '%s', %s:")
-                    print(msg % (name, line))
-                else:
-                    print("All parallel loops found are internal loops.")
+                print_wrapped(' Fusing loops '.center(80, '-'))
+                msg = ("Attempting fusion of parallel loops (combines loops "
+                        "with similar properties)...\n")
+                print_wrapped(msg)
 
             self.func_ir._definitions = build_definitions(self.func_ir.blocks)
             self.array_analysis.equiv_sets = dict()
@@ -809,8 +831,14 @@ class ParforPass(object):
             fix_generator_types(self.func_ir.generator_info, self.return_type,
                                 self.typemap)
         if sequential_parfor_lowering:
+            if config.PARALLEL_DIAGNOSTICS:
+                msg = "Performing sequential lowering of loops...\n"
+                print_wrapped(msg)
             lower_parfor_sequential(
                 self.typingctx, self.func_ir, self.typemap, self.calltypes)
+            if config.PARALLEL_DIAGNOSTICS:
+                print_wrapped('Done \n')
+                print_wrapped(80 * '-')
         else:
             # prepare for parallel lowering
             # add parfor params to parfors here since lowering is destructive
@@ -834,137 +862,184 @@ class ParforPass(object):
                 n_parfors = len(parfor_ids)
 
                 # if there are some parfors, print information about them!
-                if n_parfors > 0:
-
+                if n_parfors > -1:
                     def dump_graph_indented(a, root_msg, node_msg):
+                        fac = len(sword)
                         def print_graph(adj, roots):
-                            fac = 3
                             def print_g(adj, root, depth):
                                 for k in adj[root]:
-                                    print(fac * depth * ' ' + '+--%s %s' % (k, node_msg))
+                                    print_wrapped(fac * depth * ' ' + '%s%s %s' % (sword, k, node_msg))
                                     if adj[k] != []:
                                         print_g(adj, k, depth + 1)
                             for r in roots:
-                                print('+--%s %s' % (r, root_msg))
+                                print_wrapped('%s%s %s' % (sword, r, root_msg))
                                 print_g(l, r, 1)
-                                print("")
+                                print_wrapped("")
                         l, roots = compute_graph_info(a)
                         print_graph(l, roots)
 
                     if self.fusion_info != {}:
-                        print("")
-                        print(("Fused loop summary for function %s, %s:" % (name, line)).center(80, '-') + "\n")
+                        print_wrapped("\n \nFused loop summary:\n")
                         dump_graph_indented(self.fusion_info, 'has the following loops fused into it:', '(fused)')
-                        fusion_adj, fusion_roots = compute_graph_info(self.fusion_info)
 
                     if self.options.fusion:
                         after_fusion = "Following the attempted fusion of parallel for-loops"
                     else:
                         after_fusion = "With fusion disabled"
 
-                    print(('\n{}, function \'{}\' ({}) has '
-                           '{} parallel for-loop(s) (originating from loops labelled {}).').format(
-                           after_fusion, name, line, n_parfors, ''.join(['#%s, ' % x for x in parfor_ids])))
-                    print(80 * '-')
-                    print("")
+                    print_wrapped(('\n{} there are {} parallel for-loop(s) (originating from loops labelled: {}).').format(
+                           after_fusion, n_parfors, ', '.join(['#%s' % x for x in parfor_ids])))
+                    print_wrapped(80 * '-')
+                    print_wrapped("")
 
                     if self.nested_fusion_info != {}:
-                        print(("Nested parallel loop summary for function %s, %s:" % (name, line)).center(80, '-') + "\n")
+                        print_wrapped((" Optimising loop nests ").center(80, '-'))
+                        print_wrapped("Attempting loop nest rewrites (optimising for the largest parallel loops)...\n ")
                         root_msg = 'is a parallel loop, containing:'
-                        node_msg = '--> rewritten as serial loop'
+                        node_msg = '--> rewritten as a serial loop'
                         dump_graph_indented(self.nested_fusion_info, root_msg, node_msg)
-                        print(80 * '-')
-                        print("")
+                        print_wrapped(80 * '-')
+                        print_wrapped("")
 
                     # Compute and print the combined nest and fuse graph if appropriate
                     nadj, nroots = compute_graph_info(self.nested_fusion_info)
-                    if nroots is not None:
 
-                        def dump_graph_before_fuse(fadj, nadj, nroots):
-                            def print_graph(fadj, nadj, nroots):
-                                fac = 3
-                                def print_g(fadj, nadj, nroot, depth):
-                                    for k in nadj[nroot]:
-                                        print(fac * depth * ' ' + '+--%s %s' % (k, '(parallel)'))
-                                        if nadj[k] != []:
-                                            print_g(fadj, nadj, k, depth + 1)
-                                        else:
-                                            for g in fadj[k]:
-                                                print(fac * depth * ' ' + '+--%s %s' % (g, '(parallel)'))
-                                # walk in nested space
+                    def dump_graph_before_fuse(fadj_, nadj_, nroots_):
+                        def print_graph(fadj_, nadj_, nroots_):
+                            fac = len(sword)
+                            def print_g(fadj_, nadj_, nroot, depth):
+                                for k in nadj_[nroot]:
+                                    print_wrapped(fac * depth * ' ' + '%s%s %s' % (sword, k, '(parallel)'))
+                                    if nadj_[k] != []:
+                                        print_g(fadj_, nadj_, k, depth + 1)
+                                    else:
+                                        for g in fadj_[k]:
+                                            print_wrapped(fac * depth * ' ' + '%s%s %s' % (sword, g, '(parallel)'))
+                            # walk in nested space
+                            i = 0
+                            for r in nroots_:
+                                if nadj_[r] != []:
+                                    print_wrapped("Parallel region %s:" % i)
+                                    i += 1
+                                    print_wrapped('%s%s %s' % (sword, r, '(parallel)'))
+                                    print_g(fadj_, nadj_, r, 1)
+                                    print_wrapped("")
+                        print_graph(fadj_, nadj_, nroots_)
+
+                    def dump_graph(fadj_, nadj_, nroots_):
+                        def print_graph(fadj_, nadj_, nroots_):
+                            fac = len(sword)
+                            def print_g(fadj_, nadj_, nroot, depth):
+                                for k in nadj_[nroot]:
+                                    msg = fac * depth * ' ' + '%s%s %s' % (sword, k, '(serial')
+                                    if nadj_[k] == []:
+                                            if fadj_[k] != []:
+                                                fused = sorted(reachable_nodes(fadj_, k))
+                                                msg += ", fused with loop(s): "
+                                                msg += ', '.join([str(x) for x in fused])
+                                            msg += ')'
+                                            print_wrapped(msg)
+                                    else:
+                                        print_wrapped(msg + ')')
+                                        print_g(fadj_, nadj_, k, depth + 1)
+
+                            # walk in nested space
+                            i = 0
+                            for r in nroots_:
+                                if nadj_[r] != []:
+                                    print_wrapped("Parallel region %s:" % i)
+                                    i += 1
+                                    print_wrapped('%s%s %s' % (sword, r, '(parallel)'))
+                                    print_g(fadj_, nadj_, r, 1)
+                                    print_wrapped("")
+                        print_graph(fadj_, nadj_, nroots_)
+
+                    # ensure adjacency lists are the same size for both sets of info
+                    # (nests and fusion may not traverse the same space, for 
+                    # convenience [] is used as a condition to halt recursion)
+                    fadj, froots = compute_graph_info(self.fusion_info)
+                    if len(fadj) > len(nadj):
+                        lim = len(fadj)
+                        tmp = nadj
+                    else:
+                        lim = len(nadj)
+                        tmp = fadj
+                    for x in range(len(tmp), lim):
+                        tmp.append([])
+
+                    if nroots is None:
+                        # TODO, sort this
+                        def dump_graph_z(a, root_msg, node_msg):
+                            def print_graph(adj, roots):
+                                def print_g(adj, root):
+                                    for k in adj[root]:
+                                        print('%s%s %s' % (sword, k, node_msg))
+                                        if adj[k] != []:
+                                            print_g(adj, k)
                                 i = 0
-                                for r in nroots:
-                                    if nadj[r] != []:
-                                        print("Parallel region %s:" % i)
-                                        i += 1
-                                        print('+--%s %s' % (r, '(parallel)'))
-                                        print_g(fadj, nadj, r, 1)
-                                        print("")
-                            print_graph(fadj, nadj, nroots)
+                                for r in roots:
+                                    print('Parallel Region: %s' % i)
+                                    print('%s%s %s' % (sword, r, root_msg))
+                                    print_g(l, r)
+                                    print("")
+                                    i += 1
+                            l, roots = compute_graph_info(a)
+                            print_graph(l, roots)
 
-                        def dump_graph(fadj, nadj, nroots):
-                            def print_graph(fadj, nadj, nroots):
-                                fac = 3
-                                def print_g(fadj, nadj, nroot, depth):
-                                    for k in nadj[nroot]:
-                                        msg = fac * depth * ' ' + '+--%s %s' % (k, '(serial')
-                                        if nadj[k] == []:
-                                                if fadj[k] != []:
-                                                    msg += ", fused with loop(s): "
-                                                    msg += ', '.join([str(x) for x in fadj[k]])
-                                                msg += ')'
-                                                print(msg)
-                                        else:
-                                            print(msg + ')')
-                                            print_g(fadj, nadj, k, depth + 1)
-
-                                # walk in nested space
+                        def dump_graph_y(a, root_msg, node_msg):
+                            def print_graph(adj, roots):
                                 i = 0
-                                for r in nroots:
-                                    if nadj[r] != []:
-                                        print("Parallel region %s:" % i)
-                                        i += 1
-                                        print('+--%s %s' % (r, '(parallel)'))
-                                        print_g(fadj, nadj, r, 1)
-                                        print("")
-                            print_graph(fadj, nadj, nroots)
+                                for r in roots:
+                                    print_wrapped('Parallel Region: %s' % i)
+                                    fusers = reachable_nodes(l, r)
+                                    if fusers != []:
+                                        msg = ', fused with loop(s): '
+                                        msg += ', '.join([str(x) for x in sorted(fusers)])
+                                    else:
+                                        msg = ''
+                                    print_wrapped('%s%s%s' % (sword, r, msg))
+                                    print("")
+                                    i += 1
+                            l, roots = compute_graph_info(a)
+                            print_graph(l, roots)
 
-                        # ensure adjacency lists are the same size for both sets of info
-                        # (nests and fusion may not traverse the same space, for 
-                        # convenience [] is used as a condition to halt recursion)
-                        fadj, froots = compute_graph_info(self.fusion_info)
-                        if len(fadj) > len(nadj):
-                            lim = len(fadj)
-                            tmp = nadj
-                        else:
-                            lim = len(nadj)
-                            tmp = fadj
-                        for x in range(len(tmp), lim):
-                            tmp.append([])
-
-                        print(("Nested loop diagnostic summary for function %s, %s:" % (name, line)).center(80, '-') + "\n")
-                        print("Before fusion:")
+                        print_wrapped((" Summary ").center(80, '-'))
+                        print_wrapped("\n \nBefore fusion:")
+                        dump_graph_z(self.fusion_info, '(parallel loop)', '(parallel loop)')
+                        print_wrapped("\n \nAfter fusion:")
+                        dump_graph_y(self.fusion_info, 'root', 'node')
+                    else:
+                        print_wrapped((" Summary ").center(80, '-'))
+                        print_wrapped("\n \nBefore fusion:")
                         dump_graph_before_fuse(fadj, nadj, nroots)
-                        print("After fusion:")
+                        print_wrapped("\n \nAfter fusion:")
                         dump_graph(fadj, nadj, nroots)
 
-                        i = 0
+                    i = 0
+                    if nroots is not None:
                         for r in nroots:
                             if nadj[r] != []:
                                 nfused, nserial = get_stats(fadj, nadj, r)
-                                msg = ('Parallel region %s (loop #%s) had %s '
+                                msg = ('\n \nParallel region %s (loop #%s) had %s '
                                     'loop(s) fused and %s loop(s) '
                                     'serialized as part of the larger '
                                     'parallel loop (#%s).')
-                                print(msg % (i, r, nfused, nserial, r))
+                                print_wrapped(msg % (i, r, nfused, nserial, r))
                                 i += 1
-                        print("")
-                        print(80 * '-')
-                        print("")
+                    else:
+                        for r in froots:
+                            _, nfused = get_stats(nadj, fadj, r)
+                            msg = ('\n \nParallel region %s (loop #%s) had %s '
+                                'loop(s) fused.')
+                            print_wrapped(msg % (i, r, nfused))
+                            i += 1
+                    print_wrapped("")
+                    print_wrapped(80 * '-')
+                    print_wrapped("\n ")
 
 
                 else:
-                    print('Function {} has no Parfor.'.format(name))                
+                    print_wrapped('Function %s, %s, has no parallel for-loops.'.format(name, line))
         return
 
     def _convert_numpy(self, blocks):
@@ -2831,7 +2906,7 @@ def dprint(*s):
 
 def print_diagnostics(msg, indent = 0):
     if config.PARALLEL_DIAGNOSTICS:
-        print(indent * 4 * ' ' + msg)
+        print_wrapped(indent * 4 * ' ' + msg)
 
 def get_parfor_pattern_vars(parfor):
     """ get the variables used in parfor pattern information

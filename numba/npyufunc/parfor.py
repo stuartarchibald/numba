@@ -25,7 +25,7 @@ from ..typing import signature
 from numba import config
 from numba.targets.cpu import ParallelOptions
 from numba.six import exec_
-
+from numba.parfor import print_wrapped
 
 def _lower_parfor_parallel(lowerer, parfor):
     """Lowerer that handles LLVM code generation for parfor.
@@ -585,6 +585,8 @@ def _create_gufunc_for_parfor_body(
     unwrap_loop_body(loop_body)
 
     if config.PARALLEL_DIAGNOSTICS:
+        print_wrapped('Loop invariant code motion'.center(80, '-'))
+        found = False
         for inst in hoisted:
             if isinstance(inst.value, ir.Expr):
                 try:
@@ -596,17 +598,21 @@ def _create_gufunc_for_parfor_body(
                                "performed before the loop is executed and "
                                "reused inside the loop):")
                         loc = inst.loc
-                        print(msg % (loc, parfor.id))
+                        print_wrapped(msg % (loc, parfor.id))
                         try:
                             path = os.path.relpath(loc.filename)
                         except ValueError:
                             path = os.path.abspath(loc.filename)
                         lines = linecache.getlines(path)
                         if lines and loc.line:
-                            print("   Allocation:: " + lines[0 if loc.line < 2 else loc.line - 1].strip())
-                        print("    - numpy.empty() is used for the allocation.\n")
+                            print_wrapped("   Allocation:: " + lines[0 if loc.line < 2 else loc.line - 1].strip())
+                        print_wrapped("    - numpy.empty() is used for the allocation.\n")
+                        found = True
                 except (KeyError, AttributeError):
                     pass
+        if not found:
+            print_wrapped('None found')
+        print_wrapped(80 * '-')
 
     if config.DEBUG_ARRAY_OPT:
         print("After hoisting")
