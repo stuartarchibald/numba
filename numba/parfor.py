@@ -984,7 +984,10 @@ class ParforPass(object):
                                     print("")
                                     i += 1
                             l, roots = compute_graph_info(a)
-                            print_graph(l, roots)
+                            if roots is not None:
+                                print_graph(l, roots)
+                            else:
+                                print("No loops to fuse!")
 
                         def dump_graph_y(a, root_msg, node_msg):
                             def print_graph(adj, roots):
@@ -1001,7 +1004,10 @@ class ParforPass(object):
                                     print("")
                                     i += 1
                             l, roots = compute_graph_info(a)
-                            print_graph(l, roots)
+                            if roots is not None:
+                                print_graph(l, roots)
+                            else:
+                                print("No loops to fuse!")
 
                         print_wrapped((" Summary ").center(80, '-'))
                         print_wrapped("\n \nBefore fusion:")
@@ -1027,12 +1033,14 @@ class ParforPass(object):
                                 print_wrapped(msg % (i, r, nfused, nserial, r))
                                 i += 1
                     else:
-                        for r in froots:
-                            _, nfused = get_stats(nadj, fadj, r)
-                            msg = ('\n \nParallel region %s (loop #%s) had %s '
-                                'loop(s) fused.')
-                            print_wrapped(msg % (i, r, nfused))
-                            i += 1
+                        if froots is not None:
+                            for r in froots:
+                                _, nfused = get_stats(nadj, fadj, r)
+                                msg = ('\n \nParallel region %s (loop #%s) had %s '
+                                    'loop(s) fused.')
+                                print_wrapped(msg % (i, r, nfused))
+                                i += 1
+
                     print_wrapped("")
                     print_wrapped(80 * '-')
                     print_wrapped("\n ")
