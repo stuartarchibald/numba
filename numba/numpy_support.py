@@ -388,7 +388,8 @@ def from_struct_dtype(dtype):
     if dtype.hasobject:
         raise TypeError("Do not support dtype containing object")
 
-    fields = {}
+    # freeze the order based on how NumPy responds to dict iter
+    fields = collections.OrderedDict()
 
     for name, info in dtype.fields.items():
         # *info* may have 3 element if it has a "title", which can be ignored

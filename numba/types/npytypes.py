@@ -75,10 +75,19 @@ class Record(Type):
         return len(self.fields)
 
     def offset(self, key):
-        return self.fields[key][1]
+        if isinstance(key, str):
+            return self.fields[key][1]
+        elif isinstance(key, int):
+            return self.offset(self.idx_to_key(key))
 
     def typeof(self, key):
-        return self.fields[key][0]
+        if isinstance(key, str):
+            return self.fields[key][0]
+        elif isinstance(key, int):
+            return self.typeof(self.idx_to_key(key))
+
+    def idx_to_key(self, idx):
+        return tuple(self.fields.keys())[idx]
 
     @property
     def members(self):

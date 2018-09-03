@@ -539,7 +539,7 @@ class StaticGetItemRecord(AbstractTemplate):
     def generic(self, args, kws):
         # Resolution of members for records
         record, idx = args
-        if isinstance(record, types.Record) and isinstance(idx, str):
+        if isinstance(record, types.Record) and isinstance(idx, (str, int)):
             ret = record.typeof(idx)
             assert ret
             return ret
