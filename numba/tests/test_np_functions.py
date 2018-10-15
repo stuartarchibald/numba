@@ -861,7 +861,6 @@ class TestNPFunctions(MemoryLeakMixin, TestCase):
             params = {'m': y, 'y': x, 'rowvar': rowvar}
             _check(params)
 
-    @unittest.skip('Examples which break currently')
     def test_cov_outstanding_problems(self):
         pyfunc = cov
         cfunc = jit(nopython=True)(pyfunc)
@@ -873,17 +872,24 @@ class TestNPFunctions(MemoryLeakMixin, TestCase):
 
         # this fails as I can't tell the output is going to be 0D
         # (i.e. it gets past the naive ndim == 1 check)
-        x = np.array([-2.1, -1, 4.3]).reshape(1, 3)
-        params = {'m': x}
-        _check(params)
+        # Edit: now fails with a runtime error
+        self.disable_leak_check()
+        try:
+            x = np.array([-2.1, -1, 4.3]).reshape(1, 3)
+            params = {'m': x}
+            _check(params)
+        except RuntimeError as e:
+            assert 'ambiguity' in str(e)
 
         # this fails as the input is not an array, so doesn't hit the
-        # ndim == 1 guard
+        #ndim == 1 guard
+        # Edit : now passes
         x = (-2.1, -1, 4.3)
         params = {'m': x}
         _check(params)
 
-        # this fails to return a 0D result
+        ## this fails to return a 0D result
+        ## Edit : now passes
         x = ()
         params = {'m': x}
         _check(params)

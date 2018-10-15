@@ -1196,11 +1196,24 @@ def _prepare_cov_input_impl(m, y, rowvar, dtype):
 
     return _prepare_cov_input_inner
 
+@register_jitable
+def _handle_m_dim_change(m):
+    if m.ndim == 2 and m.shape[0] == 1:
+        msg = ("2D array containing a single row is unsupported due to "
+               "ambiguity in type inference. To use numpy.cov in this case "
+               "simple pass the row as a 1D array, i.e. m[0].")
+        raise RuntimeError(msg)
+
+_handle_m_dim_nop = register_jitable(lambda x:x)
+
 if numpy_version >= (1, 10):
     # replicate the behaviour post numpy 1.10 bugfix release
     @overload(np.cov)
     def np_cov(m, y=None, rowvar=True, bias=False, ddof=None):
 
+        _M_DIM_HANDLER = _handle_m_dim_nop
+        if isinstance(m, types.Array):
+            _M_DIM_HANDLER = _handle_m_dim_change
         # reject problem if m and / or y are more than 2D
         if isinstance(m, types.Array):
             if m.ndim > 2:
@@ -1208,7 +1221,6 @@ if numpy_version >= (1, 10):
         if isinstance(y, types.Array):
             if y.ndim > 2:
                 raise TypeError("y has more than 2 dimensions")
-
         # infer result dtype
         if isinstance(m, types.Array):
             m_dt = as_dtype(m.dtype)
@@ -1227,6 +1239,8 @@ if numpy_version >= (1, 10):
             mmult = simple_matrix_multiply
 
         def np_cov_impl(m, y=None, rowvar=True, bias=False, ddof=None):
+            _M_DIM_HANDLER(m)
+
             X = _prepare_cov_input(m, y, rowvar, dtype).astype(dtype)
 
             if np.any(np.array(X.shape) == 0):
@@ -1235,6 +1249,8 @@ if numpy_version >= (1, 10):
                 return np_cov_impl_inner(X, bias, ddof, mmult)
 
         def np_cov_impl_single_variable(m, y=None, rowvar=True, bias=False, ddof=None):
+            _M_DIM_HANDLER(m)
+
             X = _prepare_cov_input(m, y, rowvar, dtype).astype(dtype)
 
             if np.any(np.array(X.shape) == 0):
@@ -1245,7 +1261,8 @@ if numpy_version >= (1, 10):
             return np.array(variance)
 
         # identify up front if output has ndim of 0...
-        if isinstance(m, types.Array) and m.ndim == 1:
+        if (isinstance(m, types.Array) and m.ndim == 1) or\
+           (isinstance(m, types.Tuple)):
             if y in (None, types.none):
                 return np_cov_impl_single_variable
 
