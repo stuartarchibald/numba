@@ -792,6 +792,11 @@ class BasePipeline(object):
     def add_with_handling_stage(self, pm):
         pm.add_stage(self.stage_frontend_withlift, "Handle with contexts")
 
+    def rm_dead_stage(self):
+        import numba
+        numba.ir_utils.remove_dead(
+            self.func_ir.blocks, self.func_ir.arg_names, self.func_ir)
+
     def define_nopython_pipeline(self, pm, name='nopython'):
         """Add the nopython-mode pipeline to the pipeline manager
         """
@@ -799,6 +804,7 @@ class BasePipeline(object):
         self.add_preprocessing_stage(pm)
         self.add_with_handling_stage(pm)
         self.add_pre_typing_stage(pm)
+        pm.add_stage(self.rm_dead_stage, "DCE ahead of type inference")
         self.add_typing_stage(pm)
         self.add_optimization_stage(pm)
         pm.add_stage(self.stage_ir_legalization,

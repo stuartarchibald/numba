@@ -550,6 +550,7 @@ def remove_dead_block(block, lives, call_table, arg_aliases, alias_map,
             stmt = f(stmt, lives, arg_aliases, alias_map, func_ir, typemap)
             if stmt is None:
                 removed = True
+                print("Removing %s" % stmt)
                 continue
         # ignore assignments that their lhs is not live or lhs==rhs
         if isinstance(stmt, ir.Assign):
@@ -558,8 +559,10 @@ def remove_dead_block(block, lives, call_table, arg_aliases, alias_map,
             if lhs.name not in lives and has_no_side_effect(
                     rhs, lives_n_aliases, call_table):
                 removed = True
+                print("Removing %s" % stmt)
                 continue
             if isinstance(rhs, ir.Var) and lhs.name == rhs.name:
+                print("Removing %s" % stmt)
                 removed = True
                 continue
             # TODO: remove other nodes like SetItem etc.
