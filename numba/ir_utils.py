@@ -516,6 +516,11 @@ def remove_dead(blocks, args, func_ir, typemap=None, alias_map=None, arg_aliases
             lives |= live_map[out_blk]
         removed |= remove_dead_block(block, lives, call_table, arg_aliases,
                                      alias_map, alias_set, func_ir, typemap)
+
+    if removed:
+        post_proc = numba.postproc.PostProcessor(func_ir)
+        post_proc.run()
+
     return removed
 
 
