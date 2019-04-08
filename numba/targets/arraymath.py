@@ -2344,6 +2344,9 @@ def np_imag(a):
 #----------------------------------------------------------------------------
 # Misc functions
 
+np_delete_slice_handler_isslice = register_jitable(lambda x: x)
+np_delete_slice_handler_isarrlike = register_jitable(lambda x: np.asarray(x))
+
 @overload(np.delete)
 def np_delete(arr, obj):
     # Implementation based on numpy
@@ -2351,15 +2354,6 @@ def np_delete(arr, obj):
 
     if not isinstance(arr, (types.Array, types.Sequence)):
         raise TypingError("arr must be either an Array or a Sequence")
-
-    def np_delete_impl(arr, obj):
-        arr = np.ravel(np.asarray(arr))
-        N = arr.size
-
-        keep = np.ones(N, dtype=np.bool_)
-        obj = np.array(obj)
-        keep[obj] = False
-        return arr[keep]
 
     def np_delete_scalar_impl(arr, obj):
         arr = np.ravel(np.asarray(arr))
@@ -2376,17 +2370,22 @@ def np_delete(arr, obj):
 
         return np.concatenate((arr[:pos], arr[pos+1:]))
 
-    def np_delete_slice_impl(arr, obj):
-        arr = np.ravel(np.asarray(arr))
-        N = arr.size
+    is_slice = isinstance(obj, types.SliceType)
+    if is_slice or isinstance(obj, (types.Array, types.Sequence)):
+        if is_slice:
+            handler = np_delete_slice_handler_isslice
+        else:
+            handler = np_delete_slice_handler_isarrlike
 
-        keep = np.ones(N, dtype=np.bool_)
-        keep[obj] = False
-        return arr[keep]
+        def np_delete_impl(arr, obj):
+            arr = np.ravel(np.asarray(arr))
+            N = arr.size
 
-    if isinstance(obj, (types.SliceType)):
-        return np_delete_slice_impl
-    elif isinstance(obj, (types.Array, types.Sequence)):
+            keep = np.ones(N, dtype=np.bool_)
+            obj = handler(obj)
+            keep[obj] = False
+            return arr[keep]
+
         return np_delete_impl
     else: # scalar value
         if not isinstance(obj, types.Integer):
