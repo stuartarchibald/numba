@@ -5,10 +5,13 @@ from __future__ import print_function, division, absolute_import
 import collections
 import functools
 import os
+import platform
 import struct
 import sys
+import textwrap
 import uuid
 import weakref
+import numpy as np
 from copy import deepcopy
 
 from numba import _dispatcher, compiler, utils, types, config, errors
@@ -310,8 +313,29 @@ class _DispatcherBase(_dispatcher.Dispatcher):
             specified issue_type.
             """
             if config.SHOW_HELP:
+                import numba
+                system = platform.system()
+                nb_ver = numba.__version__
+                np_ver = np.__version__
+                pyv = sys.version_info
+                py_ver = '%s.%s.%s' % (pyv.major, pyv.minor, pyv.micro)
+                vt = (system, nb_ver, np_ver, py_ver)
+                debug_stamp = ("This is a debug stamp containing minimal "
+                               "information about the system and current "
+                               "environment, it's really helpful when "
+                               "reporting errors if you can include this... "
+                               "thanks!")
+                debug_stamp = '\n' + textwrap.fill(debug_stamp, 80) + '\n'
+                buf = []
+                stamp = "%s;nb=%s;np=%s;py=%s" % vt
+                title = "debug stamp"
+                l = max(len(title), len(stamp))
+                buf.append(title.center(l + 2, '-'))
+                buf.append('|' + stamp.center(l) + "|")
+                buf.append("-" * (l + 2))
                 help_msg = errors.error_extras[issue_type]
-                e.patch_message(''.join(e.args) + help_msg)
+                e.patch_message(''.join(e.args) + help_msg + debug_stamp
+                                + '\n'.join(buf))
             if config.FULL_TRACEBACKS:
                 raise e
             else:
