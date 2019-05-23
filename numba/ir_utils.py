@@ -1970,7 +1970,3 @@ def check_and_legalize_ir(func_ir):
            "and is attempting to do, however something inside Numba needs fixing...\n%s") % (func_ir.loc, feedback_details)
     if not func_ir.equal_ir(orig_ir):
         warnings.warn(NumbaWarning(msg, loc=func_ir.loc))
-        print("IR NOT EQUAL: %s, %s" % (func_ir.func_id.func_name, func_ir.loc))
-        #orig_ir.dump()
-        #print('-'*80)
-        #func_ir.dump()
