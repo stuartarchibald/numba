@@ -40,6 +40,17 @@ class Loc(object):
         self.lines = None # the source lines from the linecache
         self.maybe_decorator = maybe_decorator
 
+    def __eq__(self, other):
+        # equivalence is solely based on filename, line and col
+        if type(self) is not type(other): return False
+        if self.filename != other.filename: return False
+        if self.line != other.line: return False
+        if self.col != other.col: return False
+        return True
+
+    def __ne__(self, other):
+        return not self.__eq__(other)
+
     @classmethod
     def from_function_id(cls, func_id):
         return cls(func_id.filename, func_id.firstlineno, maybe_decorator=True)
@@ -185,8 +196,22 @@ class Loc(object):
 # Used for annotating errors when source location is unknown.
 unknown_loc = Loc("unknown location", 0, 0)
 
+class EqualityCheckMixin(object):
+    """ Mixin for basic equality checking """
 
-class VarMap(object):
+    def __eq__(self, other):
+        if type(self) == type(other):
+            if self.__dict__ == other.__dict__:
+                return True
+        return False
+
+    def __ne__(self, other):
+        return not self.__eq__(other)
+
+    def __hash__(self):
+        return id(self)
+
+class VarMap(EqualityCheckMixin):
     def __init__(self):
         self._con = {}
 
@@ -223,8 +248,7 @@ class AbstractRHS(object):
     This class **does not** define any methods.
     """
 
-
-class Inst(AbstractRHS):
+class Inst(AbstractRHS, EqualityCheckMixin):
     """
     Base class for all IR instructions.
     """
@@ -767,7 +791,7 @@ class EnterWith(Stmt):
         return [self.contextmanager]
 
 
-class Arg(AbstractRHS):
+class Arg(AbstractRHS, EqualityCheckMixin):
     def __init__(self, name, index, loc):
         assert isinstance(name, str)
         assert isinstance(index, int)
@@ -783,7 +807,7 @@ class Arg(AbstractRHS):
         raise ConstantInferenceError('%s' % self, loc=self.loc)
 
 
-class Const(AbstractRHS):
+class Const(AbstractRHS, EqualityCheckMixin):
     def __init__(self, value, loc, use_literal_type=True):
         assert isinstance(loc, Loc)
         self.value = value
@@ -797,7 +821,7 @@ class Const(AbstractRHS):
     def infer_constant(self):
         return self.value
 
-class Global(AbstractRHS):
+class Global(AbstractRHS, EqualityCheckMixin):
     def __init__(self, name, value, loc):
         assert isinstance(loc, Loc)
         self.name = name
@@ -816,7 +840,7 @@ class Global(AbstractRHS):
         return Global(self.name, self.value, copy.deepcopy(self.loc))
 
 
-class FreeVar(AbstractRHS):
+class FreeVar(AbstractRHS, EqualityCheckMixin):
     """
     A freevar, as loaded by LOAD_DECREF.
     (i.e. a variable defined in an enclosing non-global scope)
@@ -841,7 +865,7 @@ class FreeVar(AbstractRHS):
         return self.value
 
 
-class Var(AbstractRHS):
+class Var(AbstractRHS, EqualityCheckMixin):
     """
     Attributes
     -----------
@@ -873,7 +897,7 @@ class Var(AbstractRHS):
         return self.name.startswith("$")
 
 
-class Intrinsic(object):
+class Intrinsic(EqualityCheckMixin):
     """
     A low-level "intrinsic" function.  Suitable as the callable of a "call"
     expression.
@@ -896,7 +920,7 @@ class Intrinsic(object):
         return self.name
 
 
-class Scope(object):
+class Scope(EqualityCheckMixin):
     """
     Attributes
     -----------
@@ -990,7 +1014,7 @@ class Scope(object):
                                                           self.loc)
 
 
-class Block(object):
+class Block(EqualityCheckMixin):
     """A code block
 
     """
@@ -1094,7 +1118,7 @@ class Block(object):
         return "<ir.Block at %s>" % (self.loc,)
 
 
-class Loop(object):
+class Loop(EqualityCheckMixin):
     """Describes a loop-block
     """
     __slots__ = "entry", "exit"
@@ -1108,7 +1132,7 @@ class Loop(object):
         return "Loop(entry=%s, exit=%s)" % args
 
 
-class With(object):
+class With(EqualityCheckMixin):
     """Describes a with-block
     """
     __slots__ = "entry", "exit"
@@ -1120,7 +1144,6 @@ class With(object):
     def __repr__(self):
         args = self.entry, self.exit
         return "With(entry=%s, exit=%s)" % args
-
 
 class FunctionIR(object):
 
@@ -1136,6 +1159,12 @@ class FunctionIR(object):
         self._definitions = definitions
 
         self._reset_analysis_variables()
+
+    def equal_ir(self, other):
+        """ Checks that IR (and solely IR) is equal """
+        if type(self) is type(other):
+            return self.blocks == other.blocks
+        return False
 
     def _reset_analysis_variables(self):
         from . import consts
@@ -1243,7 +1272,7 @@ class FunctionIR(object):
 
 
 # A stub for undefined global reference
-class UndefinedType(object):
+class UndefinedType(EqualityCheckMixin):
 
     _singleton = None
 
