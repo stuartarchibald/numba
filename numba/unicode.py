@@ -17,7 +17,8 @@ from numba.extending import (
     register_jitable,
 )
 from numba.targets.imputils import (lower_constant, lower_cast, lower_builtin,
-                                    iternext_impl, impl_ret_new_ref, RefType)
+                                    iternext_impl, impl_ret_new_ref,
+                                    impl_ret_untracked, RefType)
 from numba.datamodel import register_default, StructModel
 from numba import cgutils
 from numba import types
@@ -1083,31 +1084,43 @@ def iternext_unicode(context, builder, sig, args, result):
         builder.store(nindex, iterobj.index)
 
 @intrinsic
-def _str2int_unicode(typingctx, stringty, basety):
+def _str2int_unicode(typingctx, string_ty, base_ty):
     """Wrap numba_str2int_unicode
 
     Returns number from converted string.
     """
     resty = types.int64
-    sig = resty(stringty, basety)
+    sig = resty(string_ty, base_ty)
 
     def codegen(context, builder, sig, args):
-        [string, base] = args
-        fnty = ir.FunctionType(ir.IntType(64), [ir.IntType(8).as_pointer(), ir.IntType(32)])
+        [string_arg, base_arg] = args
+        # here we convert the string LLVM IR arg into a struct, this gives
+        # access to the struct members
+        string_struct = cgutils.create_struct_proxy(types.unicode_type)(context, builder, value=string_arg)
+        # this is your function prototype
+        fnty = ir.FunctionType(ir.IntType(64), [ir.IntType(8).as_pointer(), ir.IntType(64)])
+        # this is inserting the function def into the IR
         fn = builder.module.get_or_insert_function(fnty, name='numba_str2int_unicode')
-        n = builder.call(fn, [string, cgutils.int32_t(32)])
-        return n
+        # calling the function using the `.data` member of the UnicodeModel:
+        # https://github.com/numba/numba/blob/8e145fe924c48fc778000b4d398104442a451471/numba/unicode.py#L40-L52
+        # this works generally by accident because short numerical strings tend to be
+        # ASCII compatible
+        n = builder.call(fn, [string_struct.data, base_arg])
+        # define the return, which is the same type as the base_ty
+        return impl_ret_untracked(context, builder, sig.return_type, n)
 
     return sig, codegen
 
-@overload(int)
+# this is a pointless function to overload as it's easier to overload than `int`
+def myint(string, base):
+    return int(string, base)
+
+@overload(myint)
 def int_overload(string, base):
+    # typing scope, string and base here are the Numba types
     if not isinstance(string, types.UnicodeType):
         return
 
-    stringty, basety = string, base
-
-    def impl(string, base):
-        return _str2int_unicode(stringty, basety)
-
+    def impl(string, base): # codegen/definition scope, actual args in use
+        return _str2int_unicode(string, base)
     return impl

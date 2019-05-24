@@ -1010,6 +1010,21 @@ class TestUnicodeIteration(BaseTest):
             with self.assertRaises(StopIteration):
                 f()
 
+@unittest.skipUnless(_py34_or_later,
+                     'unicode support requires Python 3.4 or later')
+class TestUnicodeStr2Int(BaseTest):
+
+    def test_str2int_demo(self):
+        from numba.unicode import myint
+
+        @njit
+        def foo(strval, base):
+            return myint(strval, base)
+
+        for x, y in [("12", 10), ("10", 3)]:
+            print("python:", foo.py_func(x, y))
+            print("numba :", foo(x, y))
+
 
 if __name__ == '__main__':
     unittest.main()

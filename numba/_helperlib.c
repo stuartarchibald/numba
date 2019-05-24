@@ -1132,12 +1132,16 @@ numba_extract_unicode(PyObject *obj, Py_ssize_t *length, int *kind,
 NUMBA_EXPORT_FUNC(uint64_t)
 numba_str2int_unicode(const char* str, int base)
 {
+    unsigned long int tmp;
     if (!str)
     {
         return 0;
     }
-
-    return strtol(str, NULL, base);
+    printf("C side str: %s\n", str);
+    printf("C side base: %d\n", base);
+    tmp = strtol(str, NULL, base);
+    printf("C side strtol result: %ld\n", tmp);
+    return tmp;
 }
 
 
