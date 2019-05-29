@@ -19,7 +19,8 @@ from numba.extending import (
     register_jitable,
 )
 from numba.targets.imputils import (lower_constant, lower_cast, lower_builtin,
-                                    iternext_impl, impl_ret_new_ref, RefType)
+                                    iternext_impl, impl_ret_new_ref,
+                                    impl_ret_untracked, RefType)
 from numba.datamodel import register_default, StructModel
 from numba import cgutils
 from numba import types
@@ -599,15 +600,53 @@ def unicode_split(a, sep=None, maxsplit=-1):
 
 
 @intrinsic
-def _strlower(typingctx, src):
+def _strlower(typingctx, string_arg_type):
+    # typingctx - the typing context
+    # string_arg_type - the arg, as its type
+
+    # This scope is for typing, the type of `string_arg_type` is types.unicode_type
     resty = types.int64
-    sig = resty(src)
+
+    # define the typing signature for this intrinsic
+    sig = resty(string_arg_type)
+
     def codegen(context, builder, sig, args):
-        [src] = args
-        fnty = ir.FunctionType(types.intc, [types.UnicodeType])
+        # This scope is the code gen part for generating the LLVM IR
+        # context - the code gen context, has useful functions attached!
+        # builder - this is the LLVM IR builder (minor extension on llvmlite.ir.builder.IRBuilder)
+        # sig - is the signature (Numba typing types)
+        # args - are the args, as LLVM IR instructions
+
+        # unpack the args, this function has 1, the string
+        [string_arg,] = args
+
+        # Recall that the unicode type implementation in Numba is a structure
+        # https://github.com/numba/numba/blob/8e145fe924c48fc778000b4d398104442a451471/numba/unicode.py#L40-L52
+
+        # Create a proxy for the unicode structure
+        string_struct_proxy = cgutils.create_struct_proxy(types.unicode_type)
+
+        # instantiate the proxy with the string arg, this makes the members
+        # trivially addressable as attrs
+        string_struct = string_struct_proxy(context, builder, value=string_arg)
+
+        # This part is about calling the C function that does the work,
+        # the function is declared in C as `int numba_str_lower(char *str)`
+        # for x86_64 this signature will likely work, it's described using
+        # llvmlite IR as it will be used in `get_or_insert_function` and
+        # subsequently in the call to inject the IR necessary to stage the call
+        fnty = ir.FunctionType(ir.IntType(64), [ir.IntType(8).as_pointer()])
         fn = builder.module.get_or_insert_function(fnty, name='numba_str_lower')
-        n = builder.call(fn, src)
-        return n
+
+        # The call site takes the function, and then an iterable of the arg(s)
+        # in this case, the `.data` member of the unicode struct type is used
+        # as it points to the raw unicode data
+        n = builder.call(fn, [string_struct.data,])
+
+        # return success?!
+        return impl_ret_untracked(context, builder, sig.return_type, n)
+
+    # return the typing signature and the code generation function
     return sig, codegen
 
 @overload_method(types.UnicodeType, 'lower')
