@@ -1683,6 +1683,24 @@ class ParforPass(object):
                     end_label = next_label()
                     loop_body[end_label] = ir.Block(scope, loc)
 
+                    races = set()
+
+                    for l, b in blocks.items():
+                        for stmt in b.body:
+                            if isinstance(stmt, ir.SetItem):
+                                if isinstance(self.typemap[stmt.target.name], types.Array):
+                                    idx = get_definition(self.func_ir, stmt.index.name)
+                                    if idx in loop_index_vars:
+                                        print("Race condition")
+                                    if isinstance(idx, ir.Expr):
+                                        if idx.op == 'binop':
+                                            tmp = (get_definition(self.func_ir, idx.lhs, lhs_only=True),
+                                                   get_definition(self.func_ir, idx.rhs, lhs_only=True))
+                                            for t in tmp:
+                                                if isinstance(t, ir.Var):
+                                                    if t.name in loop_index_vars:
+                                                        print("Race condition on: %s" % idx)
+                                                        races |= {t.name}
                     # Detect races in the prange.
                     # Races are defs in the parfor body that are live at the exit block.
                     bodydefs = set()
@@ -1691,7 +1709,7 @@ class ParforPass(object):
                     exit_lives = set()
                     for bl in loop.exits:
                         exit_lives = exit_lives.union(live_map[bl])
-                    races = bodydefs.intersection(exit_lives)
+                    races |= bodydefs.intersection(exit_lives)
 
                     # replace jumps to header block with the end block
                     for l in body_labels:
