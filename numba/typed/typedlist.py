@@ -225,6 +225,17 @@ class List(MutableSequence):
     def copy(self):
         return _copy(self)
 
+    def __str__(self):
+        buf = []
+        for x in self:
+            buf.append("{}".format(x))
+        return '[{0}]'.format(', '.join(buf))
+
+    def __repr__(self):
+        body = str(self)
+        prefix = str(self._list_type)
+        return "{prefix}({body})".format(prefix=prefix, body=body)
+
 
 # XXX: should we have a better way to classmethod
 @overload_method(TypeRef, 'empty_list')
