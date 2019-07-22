@@ -163,6 +163,7 @@ class OmittedArgDataModel(DataModel):
         return None
 
 
+@register_default(types.BooleanLiteral)
 @register_default(types.Boolean)
 class BooleanModel(DataModel):
     _bit_type = ir.IntType(1)

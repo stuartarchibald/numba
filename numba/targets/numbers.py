@@ -1328,6 +1328,11 @@ def boolean_to_any(context, builder, fromty, toty, val):
     asint = builder.zext(val, Type.int())
     return context.cast(builder, asint, types.int32, toty)
 
+@lower_cast(types.BooleanLiteral, types.Boolean)
+def booleanlitearl_to_boolean(context, builder, fromty, toty, val):
+    # Casting from boolean to anything first casts to int8
+    asint = builder.zext(val, Type.int(8))
+    return context.cast(builder, asint, types.int8, toty)
 
 @lower_cast(types.IntegerLiteral, types.Boolean)
 def literal_int_to_boolean(context, builder, fromty, toty, val):
@@ -1337,6 +1342,7 @@ def literal_int_to_boolean(context, builder, fromty, toty, val):
         fromty.literal_value,
         )
     return context.is_true(builder, fromty.literal_type, lit)
+
 
 #-------------------------------------------------------------------------------
 # Constants
