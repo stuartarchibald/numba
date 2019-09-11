@@ -9,8 +9,10 @@ from llvmlite.llvmpy.core import Type, Constant
 import llvmlite.llvmpy.core as lc
 
 from numba import npdatetime, types, cgutils, numpy_support
-from .imputils import lower_builtin, lower_constant, impl_ret_untracked
+from .imputils import (lower_builtin, lower_constant, impl_ret_untracked,
+                       lower_cast)
 from ..utils import IS_PY3
+from numba.extending import overload_method
 
 
 # datetime64 and timedelta64 use the same internal representation
@@ -802,3 +804,26 @@ def _cast_to_timedelta(context, builder, val):
         with els:
             builder.store(builder.fptosi(val, TIMEDELTA64), temp)
     return builder.load(temp)
+
+
+################################################################################
+# hash support
+
+@lower_cast(types.NPDatetime, types.Integer)
+def _cast_dt_to_int(context, builder, fromty, toty, val):
+    fromty_bitwidth = 64
+    if toty.bitwidth == fromty_bitwidth:
+        # change of signedness
+        return val
+    elif toty.bitwidth < fromty_bitwidth:
+        # Downcast
+        return builder.trunc(val, context.get_value_type(toty))
+    else:
+        # Unsigned upcast
+        return builder.zext(val, context.get_value_type(toty))
+
+@overload_method(types.NPDatetime, '__hash__')
+def _hash_NPDatetime(inst):
+    def impl(inst):
+        return hash(np.int64(inst))
+    return impl

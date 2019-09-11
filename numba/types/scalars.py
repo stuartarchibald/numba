@@ -132,7 +132,7 @@ class Complex(Number):
         return self.bitwidth < other.bitwidth
 
 
-class _NPDatetimeBase(Type):
+class _NPDatetimeBase(Hashable):
     """
     Common base class for np.datetime64 and np.timedelta64.
     """
