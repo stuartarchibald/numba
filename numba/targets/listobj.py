@@ -13,6 +13,7 @@ from numba.targets.imputils import (lower_builtin, lower_cast,
                                     iternext_impl, impl_ret_borrowed,
                                     impl_ret_new_ref, impl_ret_untracked,
                                     RefType)
+from numba.extending import overload_method
 from numba.utils import cached_property
 from . import quicksort, slicing
 
@@ -1031,42 +1032,69 @@ def list_reverse(context, builder, sig, args):
 # -----------------------------------------------------------------------------
 # Sorting
 
-_sorting_init = False
+#def load_sorts():
+    #"""
+    #Load quicksort lazily, to avoid circular imports accross the jit() global.
+    #"""
+    #g = globals()
 
-def load_sorts():
-    """
-    Load quicksort lazily, to avoid circular imports accross the jit() global.
-    """
-    g = globals()
-    if g['_sorting_init']:
-        return
+    #def gt(a, b):
+        #return a > b
 
-    def gt(a, b):
-        return a > b
+    #default_sort = quicksort.make_jit_quicksort()
+    #reversed_sort = quicksort.make_jit_quicksort(lt=gt)
+    #g['run_default_sort'] = default_sort.run_quicksort
+    #g['run_reversed_sort'] = reversed_sort.run_quicksort
 
-    default_sort = quicksort.make_jit_quicksort()
-    reversed_sort = quicksort.make_jit_quicksort(lt=gt)
-    g['run_default_sort'] = default_sort.run_quicksort
-    g['run_reversed_sort'] = reversed_sort.run_quicksort
-    g['_sorting_init'] = True
+#def load_sorts_key(key):
+    #"""
+    #Load quicksort lazily, to avoid circular imports accross the jit() global.
+    #"""
+    #g = globals()
+
+    #def gt(a, b):
+        #return a > b
+
+    #default_sort = quicksort.make_jit_quicksort(key=key)
+    #reversed_sort = quicksort.make_jit_quicksort(lt=gt, key=key)
+    #g['run_default_sort'] = default_sort.run_quicksort
+    #g['run_reversed_sort'] = reversed_sort.run_quicksort
+    #g['_sorting_init'] = True
+
+def gt(a, b):
+    return a > b
+
+sort_forwards = quicksort.make_jit_quicksort().run_quicksort
+sort_backwards = quicksort.make_jit_quicksort(lt=gt).run_quicksort
+
+arg_sort_forwards = quicksort.make_jit_quicksort(is_argsort=True).run_quicksort
+arg_sort_backwards = quicksort.make_jit_quicksort(is_argsort=True, lt=gt).run_quicksort
 
 
-@lower_builtin("list.sort", types.List)
-@lower_builtin("list.sort", types.List, types.Boolean)
-def list_sort(context, builder, sig, args):
-    load_sorts()
+@overload_method(types.List, "sort")
+def ol_list_sort(lst, key=None, reverse=None):
 
-    if len(args) == 1:
-        sig = typing.signature(sig.return_type, *sig.args + (types.boolean,))
-        args = tuple(args) + (cgutils.false_bit,)
+    if (isinstance(key, (types.NoneType, types.Omitted)) or key is None):
+        KEY = False
+        sort_f = sort_forwards
+        sort_b = sort_backwards
+    else:
+        KEY = True
+        sort_f = arg_sort_forwards
+        sort_b = arg_sort_backwards
 
-    def list_sort_impl(lst, reverse):
-        if reverse:
-            run_reversed_sort(lst)
+    def impl(lst, key=None, reverse=None):
+        if KEY is True:
+            _lst = [key(x) for x in lst]
         else:
-            run_default_sort(lst)
-
-    return context.compile_internal(builder, list_sort_impl, sig, args)
+            _lst = lst
+        if reverse is None or reverse == 0:
+            tmp = sort_f(_lst)
+        else:
+            tmp = sort_b(_lst)
+        if KEY is True:
+            lst[:] = [lst[i] for i in tmp]
+    return impl
 
 @lower_builtin(sorted, types.IterableType)
 @lower_builtin(sorted, types.IterableType, types.Boolean)

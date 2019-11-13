@@ -38,7 +38,7 @@ def make_quicksort_impl(wrap, lt=None, is_argsort=False):
     if is_argsort:
         @wrap
         def make_res(A):
-            return np.arange(A.size)
+            return [x for x in range(len(A))]
 
         @wrap
         def GET(A, idx_or_val):
