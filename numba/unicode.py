@@ -1309,12 +1309,7 @@ def unicode_isupper(a):
             return _unicode_is_upper(a)
     return impl
 
-
-@overload_method(types.UnicodeType, 'upper')
-def unicode_upper(a):
-    """
-    Implements .upper()
-    """
+def generate_unicode_FOO(ASCII_FUNC, UNICODE_NRES_FUNC):
     def impl(a):
         # main structure is a translation of:
         # https://github.com/python/cpython/blob/1d4b6ba19466aba0eb91c4ba01ba509acf18c723/Objects/unicodeobject.c#L13308-L13316    # noqa: E501
@@ -1327,7 +1322,7 @@ def unicode_upper(a):
             ret = _empty_string(a._kind, l, a._is_ascii)
             for idx in range(l):
                 code_point = _get_code_point(a, idx)
-                _set_code_point(ret, idx, _Py_TOUPPER(code_point))
+                _set_code_point(ret, idx, ASCII_FUNC(code_point))
             return ret
         else:
             # This part in an amalgamation of two algorithms:
@@ -1346,7 +1341,7 @@ def unicode_upper(a):
             for idx in range(l):
                 mapped[:] = 0
                 code_point = _get_code_point(a, idx)
-                n_res = _PyUnicode_ToUpperFull(_Py_UCS4(code_point), mapped)
+                n_res = UNICODE_NRES_FUNC(_Py_UCS4(code_point), mapped)
                 for j in range(n_res):
                     maxchar = max(maxchar, mapped[j])
                     _set_code_point(tmp, k, mapped[j])
@@ -1360,48 +1355,22 @@ def unicode_upper(a):
             return ret
     return impl
 
+_unicode_upper_work = generate_unicode_FOO(_Py_TOUPPER, _PyUnicode_ToUpperFull)
+
+@overload_method(types.UnicodeType, 'upper')
+def unicode_upper(a):
+    """
+    Implements .upper()
+    """
+    return _unicode_upper_work
+
+_unicode_casefold_work = generate_unicode_FOO(_Py_TOLOWER, _PyUnicode_ToFoldedFull)
 
 # https://github.com/python/cpython/blob/1d4b6ba19466aba0eb91c4ba01ba509acf18c723/Objects/unicodeobject.c#L10782-L10791    # noqa: E501
 @overload_method(types.UnicodeType, 'casefold')
 def unicode_casefold(data):
     """Implements str.casefold()"""
-    def impl(data):
-        length = len(data)
-        if length == 0:
-            return _empty_string(data._kind, length, data._is_ascii)
-
-        if data._is_ascii:
-            # https://github.com/python/cpython/blob/1d4b6ba19466aba0eb91c4ba01ba509acf18c723/Objects/unicodeobject.c#L9678-L9694    # noqa: E501
-            res = _empty_string(data._kind, length, 1)
-            for idx in range(length):
-                code_point = _get_code_point(data, idx)
-                _set_code_point(res, idx, _Py_TOLOWER(code_point))
-
-            return res
-
-        # https://github.com/python/cpython/blob/1d4b6ba19466aba0eb91c4ba01ba509acf18c723/Objects/unicodeobject.c#L9863-L9908    # noqa: E501
-        # mixed with:
-        # https://github.com/python/cpython/blob/1d4b6ba19466aba0eb91c4ba01ba509acf18c723/Objects/unicodeobject.c#L9819-L9834    # noqa: E501
-        k = 0
-        maxchar = 0
-        mapped = np.zeros(3, dtype=_Py_UCS4)
-        tmp = _empty_string(PY_UNICODE_4BYTE_KIND, 3 * length)
-        for idx in range(length):
-            mapped.fill(0)
-            code_point = _get_code_point(data, idx)
-            n_res = _PyUnicode_ToFoldedFull(code_point, mapped)
-            for m in mapped[:n_res]:
-                maxchar = max(maxchar, m)
-                _set_code_point(tmp, k, m)
-                k += 1
-        newkind = _codepoint_to_kind(maxchar)
-        res = _empty_string(newkind, k)
-        for i in range(k):
-            _set_code_point(res, i, _get_code_point(tmp, i))
-
-        return res
-
-    return impl
+    return _unicode_casefold_work
 
 
 @overload_method(types.UnicodeType, 'istitle')
