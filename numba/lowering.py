@@ -1053,7 +1053,14 @@ class Lower(BaseLower):
                 signature = self.fndesc.calltypes[expr]
                 return self.lower_getitem(resty, expr, expr.value,
                                           expr.index_var, signature)
-
+        elif expr.op == "typed_getitem":
+            signature = typing.signature(
+                resty,
+                self.typeof(expr.value.name),
+                self.typeof(expr.index.name),
+            )
+            impl = self.context.get_function("typed_getitem", signature)
+            return impl(self.builder, (self.loadvar(expr.value.name), self.loadvar(expr.index.name)))
         elif expr.op == "getitem":
             signature = self.fndesc.calltypes[expr]
             return self.lower_getitem(resty, expr, expr.value, expr.index,
