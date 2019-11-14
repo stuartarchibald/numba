@@ -88,6 +88,18 @@ def literally(obj):
     return obj
 
 
+def literal_unroll(container):
+    return container
+
+
+from numba.extending import overload
+@overload(literal_unroll)
+def literal_unroll_impl(container):
+    def impl(container):
+        return container
+    return impl
+
+
 __all__ = [
     'typeof',
     'prange',
@@ -96,4 +108,5 @@ __all__ = [
     'gdb_breakpoint',
     'gdb_init',
     'literally',
+    'literal_unroll',
 ]

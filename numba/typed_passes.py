@@ -446,7 +446,7 @@ class InlineOverloads(FunctionPass):
     def run_pass(self, state):
         """Run inlining of overloads
         """
-        if config.DEBUG or self._DEBUG:
+        if self._DEBUG:
             print('before overload inline'.center(80, '-'))
             print(state.func_ir.dump())
             print(''.center(80, '-'))
@@ -465,7 +465,7 @@ class InlineOverloads(FunctionPass):
                             modified = True
                             break  # because block structure changed
 
-        if config.DEBUG or self._DEBUG:
+        if self._DEBUG:
             print('after overload inline'.center(80, '-'))
             print(state.func_ir.dump())
             print(''.center(80, '-'))
@@ -478,7 +478,7 @@ class InlineOverloads(FunctionPass):
             # functions introducing blocks
             state.func_ir.blocks = simplify_CFG(state.func_ir.blocks)
 
-        if config.DEBUG or self._DEBUG:
+        if self._DEBUG:
             print('after overload inline DCE'.center(80, '-'))
             print(state.func_ir.dump())
             print(''.center(80, '-'))
