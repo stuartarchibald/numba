@@ -501,6 +501,14 @@ class Expr(Inst):
         return cls(op=op, loc=loc, value=value, index=index)
 
     @classmethod
+    def typed_getitem(cls, value, dtype, index, loc):
+        assert isinstance(value, Var)
+        assert isinstance(loc, Loc)
+        op = 'typed_getitem'
+        return cls(op=op, loc=loc, value=value, dtype=dtype,
+                   index=index)
+
+    @classmethod
     def static_getitem(cls, value, index, index_var, loc):
         assert isinstance(value, Var)
         assert index_var is None or isinstance(index_var, Var)

@@ -392,6 +392,26 @@ class StaticGetItemConstraint(object):
         return self.fallback and self.fallback.get_call_signature()
 
 
+class TypedGetItemConstraint(object):
+    def __init__(self, target, value, dtype, index, loc):
+        self.target = target
+        self.value = value
+        self.dtype = dtype
+        self.index = index
+        self.loc = loc
+
+    def __call__(self, typeinfer):
+        with new_error_context("typing of typed-get-item at {0}", self.loc):
+            typevars = typeinfer.typevars
+            idx_ty = typevars[self.index.name].get()
+            ty = typevars[self.value.name].get()
+            from numba.typing.templates import Signature
+            self.signature = Signature(self.dtype, ty + idx_ty, None)
+            typeinfer.add_type(self.target, self.dtype, loc=self.loc)
+
+    def get_call_signature(self):
+        return self.signature
+
 def fold_arg_vars(typevars, args, vararg, kws):
     """
     Fold and resolve the argument variables of a function call.
@@ -1446,6 +1466,14 @@ http://numba.pydata.org/numba-doc/latest/user/troubleshoot.html#my-code-has-an-u
         elif expr.op == 'getitem':
             self.typeof_intrinsic_call(inst, target, operator.getitem,
                                        expr.value, expr.index,)
+        elif expr.op == 'typed_getitem':
+            constraint = TypedGetItemConstraint(target.name, value=expr.value,
+                                                 dtype=expr.dtype,
+                                                 index=expr.index,
+                                                 loc=expr.loc)
+            self.constraints.append(constraint)
+            self.calls.append((inst.value, constraint))
+
         elif expr.op == 'getattr':
             constraint = GetAttrConstraint(target.name, attr=expr.attr,
                                            value=expr.value, loc=inst.loc,

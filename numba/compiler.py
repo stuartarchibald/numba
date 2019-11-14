@@ -19,12 +19,14 @@ from .untyped_passes import (ExtractByteCode, TranslateByteCode, FixupArgs,
                              IRProcessing, DeadBranchPrune,
                              RewriteSemanticConstants, InlineClosureLikes,
                              GenericRewrites, WithLifting, InlineInlinables,
-                             FindLiterallyCalls, MakeFunctionToJitFunction)
+                             FindLiterallyCalls, MakeFunctionToJitFunction,
+                             MixedContainerUnroller)
 
 from .typed_passes import (NopythonTypeInference, AnnotateTypes,
                            NopythonRewrites, PreParforPass, ParforPass,
                            DumpParforDiagnostics, IRLegalization,
-                           NoPythonBackend, InlineOverloads)
+                           NoPythonBackend, InlineOverloads,
+                           PartialTypeInference)
 
 from .object_mode_passes import (ObjectModeFrontEnd, ObjectModeBackEnd,
                                  CompileInterpMode)
@@ -133,7 +135,7 @@ class CompileResult(namedtuple("_CompileResult", CR_FIELDS)):
                  lifted=lifted,
                  typing_error=None,
                  call_helper=None,
-                 metadata=None, # Do not store, arbitrary and potentially large!
+                 metadata=None,  # Do not store, arbitrary and potentially large!
                  reload_init=reload_init,
                  )
         return cr
@@ -455,6 +457,10 @@ class DefaultPassBuilder(object):
             pm.add_pass(DeadBranchPrune, "dead branch pruning")
 
         pm.add_pass(FindLiterallyCalls, "find literally calls")
+
+        # this is for doing mixed container unrolling
+        pm.add_pass(PartialTypeInference, "performs partial type inference")
+        pm.add_pass(MixedContainerUnroller, "performs mixed container unroll")
 
         # typing
         pm.add_pass(NopythonTypeInference, "nopython frontend")
