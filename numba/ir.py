@@ -1387,12 +1387,49 @@ class FunctionIR(object):
                                % (name,))
             value = defs[0]
 
+    def get_assignee(self, rhs_value, in_blocks=None):
+        """
+        Finds the assignee for a given RHS value. If in_blocks is given the
+        search will be limited to the specified blocks.
+        """
+        if in_blocks is None:
+            blocks = self.blocks.values()
+        elif isinstance(in_blocks, int):
+            blocks = [self.blocks[in_blocks]]
+        else:
+            blocks = [self.blocks[blk] for blk in list(in_blocks)]
+
+        assert isinstance(rhs_value, AbstractRHS)
+
+        for blk in blocks:
+            for assign in blk.find_insts(Assign):
+                if assign.value == rhs_value:
+                    return assign.target
+
+        raise ValueError("Could not find an assignee for %s" % rhs_value)
+
+
     def dump(self, file=None):
+        from numba.six import StringIO
+        nofile = file is None
         # Avoid early bind of sys.stdout as default value
-        file = file or sys.stdout
+        file = file or StringIO()
         for offset, block in sorted(self.blocks.items()):
             print('label %s:' % (offset,), file=file)
             block.dump(file=file)
+        if nofile:
+            text = file.getvalue()
+            try:
+                import pygments
+                raise ImportError
+            except ImportError:
+                print(text)
+            else:
+                from pygments import highlight
+                from pygments.lexers import DelphiLexer as lexer
+                from pygments.formatters import Terminal256Formatter
+                print(highlight(text, lexer(), Terminal256Formatter()))
+
 
     def dump_to_string(self):
         with StringIO() as sb:

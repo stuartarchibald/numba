@@ -14,7 +14,7 @@ from .analysis import (
     compute_use_defs,
 )
 from contextlib import contextmanager
-from .inline_closurecall import InlineClosureCallPass
+from .inline_closurecall import InlineClosureCallPass, inline_closure_call
 from .ir_utils import (guard, resolve_func_from_module, simplify_CFG,
                        GuardException,  convert_code_obj_to_function,
                        mk_unique_var, build_definitions,
@@ -775,4 +775,120 @@ class MixedContainerUnroller(FunctionPass):
         # reset type inference now we are done with the partial results
         state.typemap = {}
         state.return_type = None
+        return mutated
+
+
+@register_pass(mutates_CFG=True, analysis_only=False)
+class IterLoopCanonicalization(FunctionPass):
+    _name = "iter_loop_canonicalisation"
+
+    _DEBUG = False
+
+    _accepted_types = (types.Tuple, types.UniTuple)
+
+    def __init__(self):
+        FunctionPass.__init__(self)
+
+
+    def assess_loop(self, loop, func_ir, partial_typemap):
+        # it's a iter loop if:
+        # - loop header is driven by an iternext
+        # - the iternext value is a phi derived from getiter()
+
+        # check header
+        iternexts = [*func_ir.blocks[loop.header].find_exprs('iternext')]
+        if len(iternexts) != 1: return False
+        for iternext in iternexts:
+            phi = func_ir.get_definition(iternext.value)
+            if getattr(phi, 'op', False) == 'getiter':
+                ty = partial_typemap.get(phi.value.name, None)
+                if ty and isinstance(ty, self._accepted_types):
+                    return len(loop.entries) == 1
+
+    def mangle(self, loop, func_ir, cfg):
+        def get_range(a):
+            return range(len(a))
+
+        iternext = [*func_ir.blocks[loop.header].find_exprs('iternext')][0]
+        LOC=func_ir.blocks[loop.header].loc
+        from numba.ir_utils import mk_unique_var
+        get_range_var = ir.Var(func_ir.blocks[loop.header].scope, mk_unique_var('get_range_gbl'), LOC)
+        get_range_global = ir.Global('get_range', get_range, LOC)
+        assgn = ir.Assign(get_range_global, get_range_var, LOC)
+
+        loop_entry = tuple(loop.entries)[0]
+        entry_block = func_ir.blocks[loop_entry]
+        entry_block.body.insert(0, assgn)
+
+        iterarg = func_ir.get_definition(iternext.value).value
+
+        # look for iternext
+        idx = 0
+        for stmt in entry_block.body:
+            if isinstance(stmt, ir.Assign):
+                if isinstance(stmt.value, ir.Expr) and stmt.value.op == 'getiter':
+                    break
+            idx += 1
+        else:
+            raise ValueError("problem")
+
+        # create a range(len(tup)) and inject it
+        call_get_range_var = ir.Var(entry_block.scope,
+                                    mk_unique_var('call_get_range'), LOC)
+        make_call = ir.Expr.call(get_range_var, (stmt.value.value,), (), LOC)
+        assgn_call = ir.Assign(make_call, call_get_range_var, LOC)
+        entry_block.body.insert(idx, assgn_call)
+        entry_block.body[idx + 1].value.value = call_get_range_var
+
+        f = compile_to_numba_ir(get_range, {})
+        import copy
+        glbls = copy.copy(func_ir.func_id.func.__globals__)
+        inline_closure_call(func_ir, glbls, entry_block, idx, get_range,)
+        kill = entry_block.body.index(assgn)
+        entry_block.body.pop(kill)
+
+        # find the induction variable + references in the loop header
+        # fixed point iter to do this, it's a bit clunky
+        induction_vars = set()
+        header_block = func_ir.blocks[loop.header]
+
+        # find induction var
+        ind = [x for x in header_block.find_exprs('pair_first')]
+        for x in ind:
+            induction_vars.add(func_ir.get_assignee(x, loop.header))
+        # find aliases of the induction var
+        tmp = set()
+        for x in induction_vars:
+            tmp.add(func_ir.get_assignee(x, loop.header))
+        induction_vars |= tmp
+
+        # Find the downstream blocks that might reference the induction var
+        succ = set()
+        for lbl in loop.exits:
+            succ |= set([x[0] for x in cfg.successors(lbl)])
+        check_blocks = (loop.body | loop.exits | succ) ^ {loop.header}
+
+        # replace RHS use of induction var with getitem
+        for lbl in check_blocks:
+            for stmt in func_ir.blocks[lbl].body:
+                if isinstance(stmt, ir.Assign):
+                    if stmt.value in induction_vars:
+                        stmt.value = ir.Expr.getitem(iterarg, stmt.value, stmt.loc)
+
+        post_proc = postproc.PostProcessor(func_ir)
+        post_proc.run()
+
+    def run_pass(self, state):
+        func_ir = state.func_ir
+        cfg = compute_cfg_from_blocks(func_ir.blocks)
+        loops = cfg.loops()
+
+        mutated = False
+        accepted_loops = []
+        for header, loop in loops.items():
+            if self.assess_loop(loop, func_ir, state.typemap):
+                self.mangle(loop, func_ir, cfg)
+                mutated = True
+
+        func_ir.blocks = simplify_CFG(func_ir.blocks)
         return mutated

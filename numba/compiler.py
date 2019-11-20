@@ -20,7 +20,7 @@ from .untyped_passes import (ExtractByteCode, TranslateByteCode, FixupArgs,
                              RewriteSemanticConstants, InlineClosureLikes,
                              GenericRewrites, WithLifting, InlineInlinables,
                              FindLiterallyCalls, MakeFunctionToJitFunction,
-                             MixedContainerUnroller)
+                             MixedContainerUnroller, IterLoopCanonicalization)
 
 from .typed_passes import (NopythonTypeInference, AnnotateTypes,
                            NopythonRewrites, PreParforPass, ParforPass,
@@ -442,9 +442,10 @@ class DefaultPassBuilder(object):
             pm.add_pass(GenericRewrites, "nopython rewrites")
             pm.add_pass(RewriteSemanticConstants, "rewrite semantic constants")
             pm.add_pass(DeadBranchPrune, "dead branch pruning")
+
+
         pm.add_pass(InlineClosureLikes,
                     "inline calls to locally defined closures")
-
         # convert any remaining closures into functions
         pm.add_pass(MakeFunctionToJitFunction,
                     "convert make_function into JIT functions")
@@ -460,7 +461,11 @@ class DefaultPassBuilder(object):
 
         # this is for doing mixed container unrolling
         pm.add_pass(PartialTypeInference, "performs partial type inference")
+        pm.add_pass(IterLoopCanonicalization,
+                    "switch iter loops for range driven loops")
+        pm.add_pass(RewriteSemanticConstants, "rewrite semantic constants")
         pm.add_pass(MixedContainerUnroller, "performs mixed container unroll")
+        pm.add_pass(DeadBranchPrune, "dead branch pruning")
 
         # typing
         pm.add_pass(NopythonTypeInference, "nopython frontend")

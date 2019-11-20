@@ -16,6 +16,8 @@ from .imputils import (lower_builtin, lower_getattr, lower_getattr_generic,
                        impl_ret_borrowed, impl_ret_untracked,
                        numba_typeref_ctor)
 from .. import typing, types, cgutils, utils
+from numba.extending import overload
+from numba.pylowering import PYTHON_COMPAREOPMAP
 
 
 @lower_builtin(operator.is_not, types.Any, types.Any)
@@ -72,6 +74,29 @@ def const_ne_impl(context, builder, sig, args):
     res = ir.Constant(ir.IntType(1), val)
     return impl_ret_untracked(context, builder, sig.return_type, res)
 
+# this handles nonsense binop comparisons like int == string
+def ol_op_nonsense(a, b):
+
+    def impl(a, b):
+        return False
+
+    type_classes = [(types.UnicodeType, types.StringLiteral),
+                    (types.Number,),
+                    (types.Tuple,)]
+    for ty_clazz in type_classes:
+        a_u = isinstance(a, ty_clazz)
+        b_u = isinstance(b, ty_clazz)
+        if not(a_u and b_u) and (a_u or b_u):
+            return impl
+
+overload(operator.eq)(ol_op_nonsense)
+overload(operator.ne)(ol_op_nonsense)
+overload(operator.lt)(ol_op_nonsense)
+overload(operator.le)(ol_op_nonsense)
+overload(operator.gt)(ol_op_nonsense)
+overload(operator.ge)(ol_op_nonsense)
+overload(operator.is_)(ol_op_nonsense)
+overload(operator.is_not)(ol_op_nonsense)
 
 #-------------------------------------------------------------------------------
 
