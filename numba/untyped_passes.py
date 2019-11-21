@@ -149,10 +149,6 @@ class RewriteSemanticConstants(FunctionPass):
         with fallback_context(state, msg):
             rewrite_semantic_constants(state.func_ir, state.args)
 
-        if config.DEBUG or config.DUMP_IR:
-            print('branch_pruned_ir'.center(80, '-'))
-            print(state.func_ir.dump())
-            print('end branch_pruned_ir'.center(80, '-'))
         return True
 
 
@@ -179,11 +175,6 @@ class DeadBranchPrune(FunctionPass):
                'function "%s"' % (state.func_id.func_name,))
         with fallback_context(state, msg):
             dead_branch_prune(state.func_ir, state.args)
-
-        if config.DEBUG or config.DUMP_IR:
-            print('branch_pruned_ir'.center(80, '-'))
-            print(state.func_ir.dump())
-            print('end branch_pruned_ir'.center(80, '-'))
 
         return True
 
@@ -775,6 +766,7 @@ class MixedContainerUnroller(FunctionPass):
         # reset type inference now we are done with the partial results
         state.typemap = {}
         state.return_type = None
+        state.calltypes = None
         return mutated
 
 
@@ -784,13 +776,14 @@ class IterLoopCanonicalization(FunctionPass):
 
     _DEBUG = False
 
+    # if partial typing info is available it will only look at these types
     _accepted_types = (types.Tuple, types.UniTuple)
 
     def __init__(self):
         FunctionPass.__init__(self)
 
 
-    def assess_loop(self, loop, func_ir, partial_typemap):
+    def assess_loop(self, loop, func_ir, partial_typemap=None):
         # it's a iter loop if:
         # - loop header is driven by an iternext
         # - the iternext value is a phi derived from getiter()
@@ -801,8 +794,11 @@ class IterLoopCanonicalization(FunctionPass):
         for iternext in iternexts:
             phi = func_ir.get_definition(iternext.value)
             if getattr(phi, 'op', False) == 'getiter':
-                ty = partial_typemap.get(phi.value.name, None)
-                if ty and isinstance(ty, self._accepted_types):
+                if partial_typemap:
+                    ty = partial_typemap.get(phi.value.name, None)
+                    if ty and isinstance(ty, self._accepted_types):
+                        return len(loop.entries) == 1
+                else:
                     return len(loop.entries) == 1
 
     def mangle(self, loop, func_ir, cfg):
@@ -891,4 +887,20 @@ class IterLoopCanonicalization(FunctionPass):
                 mutated = True
 
         func_ir.blocks = simplify_CFG(func_ir.blocks)
+        return mutated
+
+
+@register_pass(mutates_CFG=True, analysis_only=False)
+class SimplifyCFG(FunctionPass):
+    """Perform CFG simplification"""
+    _name = "simplify_cfg"
+
+    def __init__(self):
+        FunctionPass.__init__(self)
+
+    def run_pass(self, state):
+        blks = state.func_ir.blocks
+        new_blks = simplify_CFG(blks)
+        state.func_ir.blocks = new_blks
+        mutated = blks != new_blks
         return mutated

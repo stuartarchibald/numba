@@ -238,7 +238,6 @@ def getitem_typed(context, builder, sig, args):
                 builder.branch(bbend)
 
         builder.position_at_end(bbend)
-        #import pdb; pdb.set_trace()
         res = builder.bitcast(phinode, save_slot.type)
         res = builder.load(res)
         return impl_ret_borrowed(context, builder, sig.return_type, res)

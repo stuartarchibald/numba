@@ -1419,16 +1419,19 @@ class FunctionIR(object):
             block.dump(file=file)
         if nofile:
             text = file.getvalue()
-            try:
-                import pygments
-                raise ImportError
-            except ImportError:
-                print(text)
+            if config.HIGHLIGHT_DUMPS:
+                try:
+                    import pygments
+                except ImportError:
+                    msg = "Please install pygments to see highlighted dumps"
+                    raise ValueError(msg)
+                else:
+                    from pygments import highlight
+                    from pygments.lexers import DelphiLexer as lexer
+                    from pygments.formatters import Terminal256Formatter
+                    print(highlight(text, lexer(), Terminal256Formatter()))
             else:
-                from pygments import highlight
-                from pygments.lexers import DelphiLexer as lexer
-                from pygments.formatters import Terminal256Formatter
-                print(highlight(text, lexer(), Terminal256Formatter()))
+                print(text)
 
 
     def dump_to_string(self):
@@ -1445,7 +1448,7 @@ class FunctionIR(object):
                   % (index, sorted(yp.live_vars), sorted(yp.weak_live_vars)),
                   file=file)
 
-    def render_dot(self, filename_prefix="numba_ir"):
+    def render_dot(self, filename_prefix="numba_ir", include_ir=True):
         """Render the CFG of the IR with GraphViz DOT via the
         ``graphviz`` python binding.
 
@@ -1473,11 +1476,15 @@ class FunctionIR(object):
             with StringIO() as sb:
                 blk.dump(sb)
                 label = sb.getvalue()
-            label = ''.join(
-                ['  {}\l'.format(x) for x in label.splitlines()],
-            )
-            label = "block {}\l".format(k) + label
-            g.node(str(k), label=label, shape='rect')
+            if include_ir:
+                label = ''.join(
+                    ['  {}\l'.format(x) for x in label.splitlines()],
+                )
+                label = "block {}\l".format(k) + label
+                g.node(str(k), label=label, shape='rect')
+            else:
+                label = "{}\l".format(k)
+                g.node(str(k), label=label, shape='circle')
         # Populate the edges
         for src, blk in self.blocks.items():
             for dst in blk.terminator.get_targets():

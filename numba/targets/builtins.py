@@ -81,8 +81,7 @@ def ol_op_nonsense(a, b):
         return False
 
     type_classes = [(types.UnicodeType, types.StringLiteral),
-                    (types.Number,),
-                    (types.Tuple,)]
+                    (types.Number,),]
     for ty_clazz in type_classes:
         a_u = isinstance(a, ty_clazz)
         b_u = isinstance(b, ty_clazz)

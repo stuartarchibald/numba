@@ -1099,7 +1099,16 @@ http://numba.pydata.org/numba-doc/latest/user/troubleshoot.html#my-code-has-an-u
             check_var(var)
 
         retty = self.get_return_type(typdict)
-        fntys = self.get_function_types(typdict)
+        try:
+            fntys = self.get_function_types(typdict)
+        except Exception as e:
+            # partial type inference may raise e.g. attribute error if a
+            # constraint has no computable signature, ignore this as needed
+            if raise_errors:
+                raise e
+            else:
+                fntys = None
+
         if self.generator_info:
             retty = self.get_generator_type(typdict, retty)
 
