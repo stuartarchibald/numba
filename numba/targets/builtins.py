@@ -90,8 +90,8 @@ def ol_op_nonsense(a, b):
     type_classes = [(types.UnicodeType, types.StringLiteral),
                     (types.Number,),]
 
-    a_n = isinstance(a, (types.NoneType, types.OptionalType))
-    b_n = isinstance(b, (types.NoneType, types.OptionalType))
+    a_n = isinstance(a, (types.NoneType, types.Optional))
+    b_n = isinstance(b, (types.NoneType, types.Optional))
 
     if (a_n or b_n) and not (a_n and b_n):
         return impl
