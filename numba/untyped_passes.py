@@ -20,7 +20,7 @@ from .ir_utils import (guard, resolve_func_from_module, simplify_CFG,
                        GuardException,  convert_code_obj_to_function,
                        mk_unique_var, build_definitions,
                        replace_var_names, get_name_var_table,
-                       compile_to_numba_ir,)
+                       compile_to_numba_ir, get_definition)
 
 
 @contextmanager
@@ -437,8 +437,8 @@ class MakeFunctionToJitFunction(FunctionPass):
                     if isinstance(stmt.value, ir.Expr):
                         if stmt.value.op == "make_function":
                             node = stmt.value
-                            getdef = func_ir.get_definition
-                            kw_default = getdef(node.defaults)
+                            kw_default = guard(
+                                get_definition, func_ir,  node.defaults)
                             ok = False
                             if (kw_default is None or
                                     isinstance(kw_default, ir.Const)):
@@ -708,6 +708,22 @@ class MixedContainerUnroller(FunctionPass):
             "unroll_info", [
                 "loop", "call", "arg", "getitem"])
 
+        def get_call_args(init_arg, want):
+            # Chases the assignment of a called value back through a specific
+            # call to a global function "want" and returns the arguments
+            # supplied to that function's call
+            some_call = get_definition(func_ir, init_arg)
+            if not isinstance(some_call, ir.Expr):
+                raise GuardException
+            if not some_call.op == "call":
+                raise GuardException
+            the_global = get_definition(func_ir, some_call.func)
+            if not isinstance(the_global, ir.Global):
+                raise GuardException
+            if the_global.value is not want:
+                raise GuardException
+            return some_call
+
         for lbl, loop in loops.items():
             # TODO: check the loop head has literal_unroll, if it does but
             # does not conform to the following then raise
@@ -720,44 +736,34 @@ class MixedContainerUnroller(FunctionPass):
             for iternext in iternexts:
                 # Walk the canonicalised loop structure and check it
                 # Check loop form range(literal_unroll(container)))
-                try:
-                    phi = func_ir.get_definition(iternext.value)
-                except Exception:
+                phi = guard(get_definition, func_ir,  iternext.value)
+                if phi is None:
                     continue
 
                 # check call global "range"
-                range_call = func_ir.get_definition(phi.value)
-                if not isinstance(range_call, ir.Expr):
-                    continue
-                if not range_call.op == "call":
-                    continue
-                range_global = func_ir.get_definition(range_call.func)
-                if not isinstance(range_global, ir.Global):
-                    continue
-                if range_global.value is not range:
+                range_call = guard(get_call_args, phi.value, range)
+                if range_call is None:
                     continue
                 range_arg = range_call.args[0]
 
                 # check call global "len"
-                len_call = func_ir.get_definition(range_arg)
-                if not isinstance(len_call, ir.Expr):
-                    continue
-                if not len_call.op == "call":
-                    continue
-                len_global = func_ir.get_definition(len_call.func)
-                if not isinstance(len_global, ir.Global):
-                    continue
-                if len_global.value is not len:
+                len_call = guard(get_call_args, range_arg, len)
+                if len_call is None:
                     continue
                 len_arg = len_call.args[0]
 
                 # check literal_unroll
-                literal_unroll_call = func_ir.get_definition(len_arg)
+                literal_unroll_call = guard(get_definition, func_ir, len_arg)
+                if literal_unroll_call is None:
+                    continue
                 literal_func = getattr(literal_unroll_call, 'func', None)
                 if not literal_func:
                     continue
-                call_func = func_ir.get_definition(
-                    literal_unroll_call.func).value
+                call_func = guard(get_definition, func_ir,
+                                  literal_unroll_call.func)
+                if call_func is None:
+                    continue
+                call_func = call_func.value
                 if call_func is literal_unroll:
                     assert len(literal_unroll_call.args) == 1
                     arg = literal_unroll_call.args[0]
@@ -779,8 +785,10 @@ class MixedContainerUnroller(FunctionPass):
                                     if stmt.value.value != arg:
                                         # that failed, so check for the
                                         # definition
-                                        dfn = func_ir.get_definition(
-                                            stmt.value.value)
+                                        dfn = guard(get_definition, func_ir,
+                                                    stmt.value.value)
+                                        if dfn is None:
+                                            continue
                                         args = getattr(dfn, 'args', False)
                                         if not args:
                                             continue
@@ -798,7 +806,7 @@ class MixedContainerUnroller(FunctionPass):
                         continue  # no getitem in this loop
 
                     ui = unroll_info(loop, literal_unroll_call, arg,
-                                        tuple_getitem)
+                                     tuple_getitem)
                     literal_unroll_info[lbl] = ui
 
         if not literal_unroll_info:
@@ -850,11 +858,10 @@ class MixedContainerUnroller(FunctionPass):
             for stmt in blk.body:
                 if isinstance(stmt, ir.Assign):
                     if isinstance(stmt.value,
-                                    ir.Expr) and stmt.value.op == "getitem":
+                                  ir.Expr) and stmt.value.op == "getitem":
                         # try a couple of spellings... a[i] and ref(a)[i]
                         if stmt.value.value != getitem_target:
-                            dfn = func_ir.get_definition(
-                                stmt.value.value)
+                            dfn = func_ir.get_definition(stmt.value.value)
                             args = getattr(dfn, 'args', False)
                             if not args:
                                 continue
@@ -867,8 +874,8 @@ class MixedContainerUnroller(FunctionPass):
 
         if not tuple_getitem:
             msg = ("Loop unrolling analysis has failed, there's no getitem "
-                    "in loop body that conforms to literal_unroll "
-                    "requirements.")
+                   "in loop body that conforms to literal_unroll "
+                   "requirements.")
             LOC = func_ir.blocks[loop_info.loop.header].loc
             raise errors.CompilerError(msg, LOC)
 
@@ -930,7 +937,6 @@ class MixedContainerUnroller(FunctionPass):
             blks[k] = unroll.blocks[k]
         # stitch up the loop predicate true -> new loop body jump
         blks[header_block].body[-1].truebr = replace
-
 
     def run_pass(self, state):
         mutated = False
@@ -1050,28 +1056,28 @@ class IterLoopCanonicalization(FunctionPass):
         if len(iternexts) != 1:
             return False
         for iternext in iternexts:
-            try:
-                phi = func_ir.get_definition(iternext.value)
-            except Exception:
+            phi = guard(get_definition, func_ir,  iternext.value)
+            if phi is None:
                 return False
             if getattr(phi, 'op', False) == 'getiter':
                 if partial_typemap:
                     # check that the call site is accepted, until we're
                     # confident that tuple unrolling is behaving require opt-in
                     # guard of `literal_unroll`, remove this later!
-                    phi_val_defn = func_ir.get_definition(phi.value)
+                    phi_val_defn = guard(get_definition, func_ir,  phi.value)
                     if not isinstance(phi_val_defn, ir.Expr):
                         return False
                     if not phi_val_defn.op == "call":
                         return False
-                    call = func_ir.get_definition(phi_val_defn)
-                    if len(call.args) != 1:
+                    call = guard(get_definition, func_ir,  phi_val_defn)
+                    if call is None or len(call.args) != 1:
                         return False
-                    func_var = func_ir.get_definition(call.func)
-                    func = func_ir.get_definition(func_var)
-                    if not isinstance(func, ir.Global):
+                    func_var = guard(get_definition, func_ir,  call.func)
+                    func = guard(get_definition, func_ir,  func_var)
+                    if func is None or not isinstance(func, ir.Global):
                         return False
-                    if func.value not in self._accepted_calls:
+                    if (func.value is None or
+                            func.value not in self._accepted_calls):
                         return False
 
                     # now check the type is supported
@@ -1096,7 +1102,9 @@ class IterLoopCanonicalization(FunctionPass):
         entry_block = func_ir.blocks[loop_entry]
         entry_block.body.insert(0, assgn)
 
-        iterarg = func_ir.get_definition(iternext.value).value
+        iterarg = guard(get_definition, func_ir,  iternext.value)
+        if iterarg is not None:
+            iterarg = iterarg.value
 
         # look for iternext
         idx = 0

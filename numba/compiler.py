@@ -443,7 +443,6 @@ class DefaultPassBuilder(object):
             pm.add_pass(RewriteSemanticConstants, "rewrite semantic constants")
             pm.add_pass(DeadBranchPrune, "dead branch pruning")
 
-
         pm.add_pass(InlineClosureLikes,
                     "inline calls to locally defined closures")
         # convert any remaining closures into functions

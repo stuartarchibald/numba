@@ -284,7 +284,10 @@ class PassManager(object):
                 args = (fid.modname, fid.func_qualname, self.pipeline_name,
                         printable_condition, pass_name)
                 print(("%s.%s: %s: %s %s" % args).center(120, '-'))
-                internal_state.func_ir.dump()
+                if internal_state.func_ir is not None:
+                    internal_state.func_ir.dump()
+                else:
+                    print("func_ir is None")
 
         # debug print before this pass?
         debug_print(pss.name(), self._print_before + self._print_wrap, "BEFORE")

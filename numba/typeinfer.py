@@ -1185,6 +1185,7 @@ http://numba.pydata.org/numba-doc/latest/user/troubleshoot.html#my-code-has-an-u
                                     returns[x] = instr
                                     break
 
+                    interped = ""
                     for name, offender in returns.items():
                         loc = getattr(offender, 'loc', ir.unknown_loc)
                         msg = ("Return of: IR name '%s', type '%s', "
