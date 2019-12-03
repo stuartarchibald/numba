@@ -94,7 +94,8 @@ class BaseTypeInference(FunctionPass):
                 state.locals,
                 raise_errors=self._raise_errors)
             state.typemap = typemap
-            state.return_type = return_type
+            if self._raise_errors:
+                state.return_type = return_type
             state.calltypes = calltypes
 
         def legalize_return_type(return_type, interp, targetctx):
