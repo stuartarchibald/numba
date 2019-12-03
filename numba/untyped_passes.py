@@ -1023,9 +1023,11 @@ class MixedContainerUnroller(FunctionPass):
                 break
 
         # reset type inference now we are done with the partial results
-        state.typemap = {}
-        state.return_type = None
-        state.calltypes = None
+        if mutated:
+            state.typemap = {}
+            state.return_type = None
+            state.calltypes = None
+
         return mutated
 
 
