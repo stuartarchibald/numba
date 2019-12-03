@@ -1032,5 +1032,35 @@ class TestBuiltins(TestCase):
             self._check_min_max(fn)
 
 
+class TestOperatorMixedTypes(TestCase):
+
+    def test_eq_ne(self):
+        for opstr in ('eq', 'ne'):
+            op = getattr(operator, opstr)
+            @njit
+            def func(a, b):
+                return op(a, b)
+
+            # all these things should evaluate to being equal or not, all should
+            # survive typing.
+            things = (1, 0, True, False, 1.0, 2.0, 1.1, 1j, "", "1", None, (1,))
+            for x, y in itertools.product(things, things):
+                self.assertEqual(func.py_func(x, y), func(x, y))
+
+    def test_cmp(self):
+        for opstr in ('gt', 'lt', 'ge', 'le', 'eq', 'ne'):
+            op = getattr(operator, opstr)
+            @njit
+            def func(a, b):
+                return op(a, b)
+
+            # numerical things should all be comparable
+            things = (1, 0, True, False, 1.0, 0.0, 1.1)
+            for x, y in itertools.product(things, things):
+                expected = func.py_func(x, y)
+                got = func(x, y)
+                self.assertEqual(expected, got)
+
+
 if __name__ == '__main__':
     unittest.main()

@@ -81,37 +81,72 @@ def const_ne_impl(context, builder, sig, args):
     res = ir.Constant(ir.IntType(1), val)
     return impl_ret_untracked(context, builder, sig.return_type, res)
 
-# this handles nonsense binop comparisons like int == string
-def ol_op_nonsense(a, b):
+# unicode compared to nonsensical things
+def unicode_cmp_nonsense(response):
+    def ol_cmp(a, b):
 
-    def impl(a, b):
-        return False
+        def is_ty(x, ty):
+            return isinstance(x, ty)
 
-    type_classes = [(types.UnicodeType, types.StringLiteral),
-                    (types.Number,),]
+        a_unicode = is_ty(a, (types.UnicodeType, types.StringLiteral))
+        b_unicode = is_ty(b, (types.UnicodeType, types.StringLiteral))
 
-    a_n = isinstance(a, (types.NoneType, types.Optional))
-    b_n = isinstance(b, (types.NoneType, types.Optional))
-
-    if (a_n or b_n) and not (a_n and b_n):
-        return impl
-
-    a_b = isinstance(a, types.Boolean)
-    b_b = isinstance(b, types.Boolean)
-    for ty_clazz in type_classes:
-        a_u = isinstance(a, ty_clazz)
-        b_u = isinstance(b, ty_clazz)
-        if not(a_u and b_u) and (a_u or b_u) and not (a_b or b_b):
+        if a_unicode ^ b_unicode: # one is unicode, other is not
+            def impl(a, b):
+                return response
             return impl
 
-overload(operator.eq)(ol_op_nonsense)
-overload(operator.ne)(ol_op_nonsense)
-overload(operator.lt)(ol_op_nonsense)
-overload(operator.le)(ol_op_nonsense)
-overload(operator.gt)(ol_op_nonsense)
-overload(operator.ge)(ol_op_nonsense)
-overload(operator.is_)(ol_op_nonsense)
-overload(operator.is_not)(ol_op_nonsense)
+    return ol_cmp
+
+overload(operator.eq)(unicode_cmp_nonsense(False))
+overload(operator.ne)(unicode_cmp_nonsense(True))
+
+# none compared to nonsensical things
+def cmp_none(response):
+    def ol_cmp(a, b):
+
+        def is_ty(x, ty):
+            return isinstance(x, ty)
+
+        a_none = is_ty(a, (types.NoneType,))
+        b_none = is_ty(b, (types.NoneType,))
+
+        if a_none ^ b_none: # one is none, other is not
+            def impl(a, b):
+                return response
+            return impl
+
+        if a_none and b_none: # none compared against none is valid
+            def impl(a, b):
+                return not response
+            return impl
+
+    return ol_cmp
+
+overload(operator.eq)(cmp_none(False))
+overload(operator.ne)(cmp_none(True))
+
+
+# numbers compared to nonsensical things i.e., 1 == (1,2,3), 1 == "string"
+def cmp_number(response):
+    def ol_cmp(a, b):
+
+        def is_ty(x, ty):
+            return isinstance(x, ty)
+
+        numerical = (types.Number, types.Boolean,)
+        a_numerical = is_ty(a, numerical)
+        b_numerical = is_ty(b, numerical)
+
+        if a_numerical ^ b_numerical: # one is numerical, other is not
+            def impl(a, b):
+                return response
+            return impl
+
+    return ol_cmp
+
+overload(operator.eq)(cmp_number(False))
+overload(operator.ne)(cmp_number(True))
 
 #-------------------------------------------------------------------------------
 
