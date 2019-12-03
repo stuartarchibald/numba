@@ -134,7 +134,7 @@ def cmp_number(response):
         def is_ty(x, ty):
             return isinstance(x, ty)
 
-        numerical = (types.Number, types.Boolean,)
+        numerical = (types.Number, types.Boolean, types.IntEnumMember)
         a_numerical = is_ty(a, numerical)
         b_numerical = is_ty(b, numerical)
 
