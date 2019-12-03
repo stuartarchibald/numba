@@ -721,12 +721,7 @@ class TestMixedTupleUnroll(MemoryLeakMixin, TestCase):
 
         self.assertEqual(foo(), foo.py_func())
 
-    @unittest.skip("typed.List issue")
     def test_11a(self):
-        # typed list fail with:
-        # RuntimeError: list.append failed unexpectedly
-        # gdb shows total junk in the registers for the append value
-        # PartialTypeInference seems to be the root cause?!
 
         @njit
         def foo():

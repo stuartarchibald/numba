@@ -16,7 +16,9 @@ from .imputils import (lower_builtin, lower_getattr, lower_getattr_generic,
                        impl_ret_borrowed, impl_ret_untracked,
                        numba_typeref_ctor)
 from .. import typing, types, cgutils, utils
-from ..extending import overload
+from ..extending import overload, intrinsic
+from numba.typeconv import Conversion
+from numba.errors import TypingError
 
 
 @overload(operator.truth)
@@ -81,72 +83,67 @@ def const_ne_impl(context, builder, sig, args):
     res = ir.Constant(ir.IntType(1), val)
     return impl_ret_untracked(context, builder, sig.return_type, res)
 
-# unicode compared to nonsensical things
-def unicode_cmp_nonsense(response):
-    def ol_cmp(a, b):
+# this generates == and != for comparisons where the types may not be comparable
+# or might involve none etc.
+def gen_eq_ne(op, TF):
+
+    @intrinsic
+    def cast_check(tyctx, ty_a, ty_b):
+        accept = (Conversion.exact, Conversion.promote, Conversion.safe)
+        sig = types.boolean(ty_a, ty_b)
+        fnty = tyctx.resolve_value_type(op)
+
+        try:
+            unified = tyctx.unify_types(ty_a, ty_b)
+            if isinstance(unified, types.Optional): # need a concrete type
+                raise TypingError("Concrete type required")
+        except TypingError:
+            unified = None
+
+        # can convert, go get a function to do the comparison and call that
+        # on the casted inputs
+        if unified:
+            def impl(cgctx, builder, sig, args):
+                opsig = fnty.get_call_type(tyctx, (unified, unified), {})
+                impl = cgctx.get_function(fnty, opsig)
+                a_cast = cgctx.cast(builder, args[0], sig.args[0], unified)
+                b_cast = cgctx.cast(builder, args[1], sig.args[1], unified)
+                return impl(builder, (a_cast, b_cast))
+        else:
+            # cannot convert, return false
+            def impl(cgctx, builder, sig, args):
+                if TF:
+                    return cgutils.false_bit
+                else:
+                    return cgutils.true_bit
+        return sig, impl
+
+    def ol_equality(a, b):
 
         def is_ty(x, ty):
             return isinstance(x, ty)
 
-        a_unicode = is_ty(a, (types.UnicodeType, types.StringLiteral))
-        b_unicode = is_ty(b, (types.UnicodeType, types.StringLiteral))
-
-        if a_unicode ^ b_unicode: # one is unicode, other is not
-            def impl(a, b):
-                return response
-            return impl
-
-    return ol_cmp
-
-overload(operator.eq)(unicode_cmp_nonsense(False))
-overload(operator.ne)(unicode_cmp_nonsense(True))
-
-# none compared to nonsensical things
-def cmp_none(response):
-    def ol_cmp(a, b):
-
-        def is_ty(x, ty):
-            return isinstance(x, ty)
 
         a_none = is_ty(a, (types.NoneType,))
         b_none = is_ty(b, (types.NoneType,))
-
-        if a_none ^ b_none: # one is none, other is not
-            def impl(a, b):
-                return response
-            return impl
-
         if a_none and b_none: # none compared against none is valid
             def impl(a, b):
-                return not response
+                return TF
             return impl
 
-    return ol_cmp
+        accepted = (types.Number, types.Boolean, types.UnicodeType,
+                    types.NoneType, types.Tuple, types.UniTuple)
+        if isinstance(a, accepted) and isinstance(b, accepted):
+            if a != b:
+                def impl(a, b):
+                    return cast_check(a, b)
+                return impl
 
-overload(operator.eq)(cmp_none(False))
-overload(operator.ne)(cmp_none(True))
+    return ol_equality
 
+overload(operator.eq)(gen_eq_ne(operator.eq, True))
+overload(operator.ne)(gen_eq_ne(operator.ne, False))
 
-# numbers compared to nonsensical things i.e., 1 == (1,2,3), 1 == "string"
-def cmp_number(response):
-    def ol_cmp(a, b):
-
-        def is_ty(x, ty):
-            return isinstance(x, ty)
-
-        numerical = (types.Number, types.Boolean, types.IntEnumMember)
-        a_numerical = is_ty(a, numerical)
-        b_numerical = is_ty(b, numerical)
-
-        if a_numerical ^ b_numerical: # one is numerical, other is not
-            def impl(a, b):
-                return response
-            return impl
-
-    return ol_cmp
-
-overload(operator.eq)(cmp_number(False))
-overload(operator.ne)(cmp_number(True))
 
 #-------------------------------------------------------------------------------
 
