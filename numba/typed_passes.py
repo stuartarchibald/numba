@@ -125,13 +125,16 @@ class BaseTypeInference(FunctionPass):
                 for var in retstmts:
                     cast = caststmts.get(var)
                     if cast is None or cast.value.name not in argvars:
-                        raise TypeError("Only accept returning of array passed "
-                                        "into the function as argument")
+                        if self._raise_errors:
+                            raise TypeError("Only accept returning of array "
+                                            "passed into the function as "
+                                            "argument")
 
             elif (isinstance(return_type, types.Function) or
                     isinstance(return_type, types.Phantom)):
-                msg = "Can't return function object ({}) in nopython mode"
-                raise TypeError(msg.format(return_type))
+                if self._raise_errors:
+                    msg = "Can't return function object ({}) in nopython mode"
+                    raise TypeError(msg.format(return_type))
 
         with fallback_context(state, 'Function "%s" has invalid return type'
                               % (state.func_id.func_name,)):
