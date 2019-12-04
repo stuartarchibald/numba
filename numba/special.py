@@ -89,6 +89,10 @@ def literally(obj):
 
 
 def literal_unroll(container):
+    from numba.six import PY2
+    from numba.errors import UnsupportedError
+    if PY2:
+        raise UnsupportedError("literal_unroll is not supported in Python 2")
     return container
 
 
