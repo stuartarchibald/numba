@@ -102,8 +102,9 @@ class TestTypingError(unittest.TestCase):
     def test_return_type_unification(self):
         with self.assertRaises(TypingError) as raises:
             compile_isolated(impossible_return_type, (types.int32,))
-        self.assertIn("Can't unify return type from the following types: (), complex128",
-                      str(raises.exception))
+        msg = ("Can't unify return type from the following types: Tuple(), "
+               "complex128")
+        self.assertIn(msg, str(raises.exception))
 
     def test_bad_hypot_usage(self):
         with self.assertRaises(TypingError) as raises:
