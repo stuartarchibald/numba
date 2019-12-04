@@ -95,6 +95,10 @@ def literal_unroll(container):
 from numba.extending import overload
 @overload(literal_unroll)
 def literal_unroll_impl(container):
+    from numba.six import PY2
+    from numba.errors import UnsupportedError
+    if PY2:
+        raise UnsupportedError("literal_unroll is not supported in Python 2")
     def impl(container):
         return container
     return impl

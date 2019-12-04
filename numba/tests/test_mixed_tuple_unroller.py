@@ -1160,7 +1160,7 @@ class TestConstListUnroll(MemoryLeakMixin, TestCase):
         @njit
         def foo():
             x = [1000, 2000, 3000, 4000]
-            acc = ""
+            acc = 0
             for a in literal_unroll(x[:2]):
                 acc += a
             return acc
@@ -1169,6 +1169,25 @@ class TestConstListUnroll(MemoryLeakMixin, TestCase):
             foo()
 
         self.assertIn("Invalid use of literal_unroll", str(raises.exception))
+
+@unittest.skipIf(not PY2, "Python 2 only test")
+class TestLiteralUnrollPy2(TestCase):
+
+    def test_py2_not_supported(self):
+
+        @njit
+        def foo():
+            x = (1000, 2000, 3000, 4000)
+            acc = 0
+            for a in literal_unroll(x):
+                acc += a
+            return acc
+
+        with self.assertRaises(errors.TypingError) as raises:
+            foo()
+
+        self.assertIn("literal_unroll is not supported in Python 2",
+                      str(raises.exception))
 
 
 if __name__ == '__main__':
