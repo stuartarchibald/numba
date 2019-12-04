@@ -416,50 +416,6 @@ class TestLoopCanonicalisation(MemoryLeakMixin, TestCase):
 
 
 class TestMixedTupleUnroll(MemoryLeakMixin, TestCase):
-    class DebugCompiler(CompilerBase):
-
-        def define_pipelines(self):
-            pm = PassManager("custom_pipeline")
-
-            # untyped
-            pm.add_pass(TranslateByteCode, "analyzing bytecode")
-            pm.add_pass(IRProcessing, "processing IR")
-
-            pm.add_pass(PartialTypeInference, "performs partial type inference")
-            pm.add_pass(IterLoopCanonicalization,
-                        "switch iter loops for range driven loops")
-            pm.add_pass(
-                MixedContainerUnroller,
-                "performs mixed container unroll")
-
-            # typed
-            pm.add_pass(NopythonTypeInference, "nopython frontend")
-
-            # legalise
-            pm.add_pass(IRLegalization, "ensure IR is legal")
-
-            # preserve
-            pm.add_pass(PreserveIR, "save IR for later inspection")
-
-            # lower
-            pm.add_pass(NoPythonBackend, "nopython mode backend")
-
-            # finalise the contents
-            pm.finalize()
-
-            return [pm]
-
-    def debug(self, func):
-        # use the debug compiler above with this
-        cres = func.overloads[func.signatures[0]]
-        func_ir = cres.metadata['func_ir']
-        func_ir.dump()
-        func_ir.render_dot().view()
-        from pprint import pprint
-        pprint(cres.fndesc.typemap)
-        import pdb
-        pdb.set_trace()
-        pass
 
     def test_01(self):
 
