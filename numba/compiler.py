@@ -20,7 +20,8 @@ from .untyped_passes import (ExtractByteCode, TranslateByteCode, FixupArgs,
                              RewriteSemanticConstants, InlineClosureLikes,
                              GenericRewrites, WithLifting, InlineInlinables,
                              FindLiterallyCalls, MakeFunctionToJitFunction,
-                             MixedContainerUnroller, IterLoopCanonicalization)
+                             MixedContainerUnroller, IterLoopCanonicalization,
+                             TransformLiteralUnrollConstListToTuple)
 
 from .typed_passes import (NopythonTypeInference, AnnotateTypes,
                            NopythonRewrites, PreParforPass, ParforPass,
@@ -459,6 +460,9 @@ class DefaultPassBuilder(object):
         pm.add_pass(FindLiterallyCalls, "find literally calls")
 
         # this is for doing mixed container unrolling
+        pm.add_pass(PartialTypeInference, "performs partial type inference")
+        pm.add_pass(TransformLiteralUnrollConstListToTuple,
+                    "switch const list for tuples")
         pm.add_pass(PartialTypeInference, "performs partial type inference")
         pm.add_pass(IterLoopCanonicalization,
                     "switch iter loops for range driven loops")
