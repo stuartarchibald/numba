@@ -94,7 +94,7 @@ class TestTypingError(unittest.TestCase):
             compile_isolated(issue_868, (types.Array(types.int32, 1, 'C'),))
 
         expected = (
-            "Invalid use of Function(<built-in function mul>) with argument(s) of type(s): (tuple({0} x 1), {1})"
+            "Invalid use of Function(<built-in function mul>) with argument(s) of type(s): (UniTuple({0} x 1), {1})"
             .format(str(types.intp), types.IntegerLiteral(2)))
         self.assertIn(expected, str(raises.exception))
         self.assertIn("[1] During: typing of", str(raises.exception))
