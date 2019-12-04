@@ -450,7 +450,7 @@ class MakeFunctionToJitFunction(FunctionPass):
                                 if kw_default.op != "build_tuple":
                                     continue
                                 ok = all([isinstance(getdef(x), ir.Const)
-                                        for x in kw_default.items])
+                                          for x in kw_default.items])
                             if not ok:
                                 print("NOT OK")
                                 continue
@@ -495,12 +495,12 @@ class TransformLiteralUnrollConstListToTuple(FunctionPass):
                         if len(call.args) > 1:
                             msg = "literal_unroll takes one argument, found %s"
                             raise errors.UnsupportedError(msg % len(call.args),
-                                                   call.loc)
+                                                          call.loc)
                         # get the arg, make sure its a build_list
                         unroll_var = call.args[0]
                         to_unroll = guard(get_definition, func_ir, unroll_var)
                         if (isinstance(to_unroll, ir.Expr) and
-                            to_unroll.op == "build_list"):
+                                to_unroll.op == "build_list"):
                             # make sure they are all const items in the list
                             for i, item in enumerate(to_unroll.items):
                                 val = guard(get_definition, func_ir, item)
@@ -526,7 +526,7 @@ class TransformLiteralUnrollConstListToTuple(FunctionPass):
                                 msg = ("multiple definitions for variable "
                                        "%s, cannot resolve constant")
                                 raise errors.UnsupportedError(msg % unroll_var,
-                                                                to_unroll.loc)
+                                                              to_unroll.loc)
                             # scan all blocks looking for the LHS
                             for b in func_ir.blocks.values():
                                 asgn = b.find_variable_assignment(
@@ -1307,6 +1307,38 @@ class IterLoopCanonicalization(FunctionPass):
 
         func_ir.blocks = simplify_CFG(func_ir.blocks)
         return mutated
+
+
+@register_pass(mutates_CFG=True, analysis_only=False)
+class LiteralUnroll(FunctionPass):
+    """Implement the literal_unroll semantics"""
+    _name = "literal_unroll"
+
+    def __init__(self):
+        FunctionPass.__init__(self)
+
+    def run_pass(self, state):
+        # run as subpipeline
+        from numba.compiler_machinery import PassManager
+        from numba.typed_passes import PartialTypeInference
+        pm = PassManager("literal_unroll_subpipeline")
+        # get types where possible to help with list->tuple change
+        pm.add_pass(PartialTypeInference, "performs partial type inference")
+        # make const lists tuples
+        pm.add_pass(TransformLiteralUnrollConstListToTuple,
+                    "switch const list for tuples")
+        # recompute partial typemap following IR change
+        pm.add_pass(PartialTypeInference, "performs partial type inference")
+        # canonicalise loops
+        pm.add_pass(IterLoopCanonicalization,
+                    "switch iter loops for range driven loops")
+        # rewrite consts
+        pm.add_pass(RewriteSemanticConstants, "rewrite semantic constants")
+        # do the unroll
+        pm.add_pass(MixedContainerUnroller, "performs mixed container unroll")
+        pm.finalize()
+        pm.run(state)
+        return True
 
 
 @register_pass(mutates_CFG=True, analysis_only=False)

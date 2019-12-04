@@ -21,7 +21,8 @@ from .untyped_passes import (ExtractByteCode, TranslateByteCode, FixupArgs,
                              GenericRewrites, WithLifting, InlineInlinables,
                              FindLiterallyCalls, MakeFunctionToJitFunction,
                              MixedContainerUnroller, IterLoopCanonicalization,
-                             TransformLiteralUnrollConstListToTuple)
+                             TransformLiteralUnrollConstListToTuple,
+                             LiteralUnroll)
 
 from .typed_passes import (NopythonTypeInference, AnnotateTypes,
                            NopythonRewrites, PreParforPass, ParforPass,
@@ -458,16 +459,7 @@ class DefaultPassBuilder(object):
             pm.add_pass(DeadBranchPrune, "dead branch pruning")
 
         pm.add_pass(FindLiterallyCalls, "find literally calls")
-
-        # this is for doing mixed container unrolling
-        pm.add_pass(PartialTypeInference, "performs partial type inference")
-        pm.add_pass(TransformLiteralUnrollConstListToTuple,
-                    "switch const list for tuples")
-        pm.add_pass(PartialTypeInference, "performs partial type inference")
-        pm.add_pass(IterLoopCanonicalization,
-                    "switch iter loops for range driven loops")
-        pm.add_pass(RewriteSemanticConstants, "rewrite semantic constants")
-        pm.add_pass(MixedContainerUnroller, "performs mixed container unroll")
+        pm.add_pass(LiteralUnroll, "handles literal_unroll")
 
         # typing
         pm.add_pass(NopythonTypeInference, "nopython frontend")
