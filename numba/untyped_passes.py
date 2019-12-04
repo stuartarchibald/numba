@@ -761,6 +761,10 @@ class MixedContainerUnroller(FunctionPass):
                 literal_unroll_call = guard(get_definition, func_ir, len_arg)
                 if literal_unroll_call is None:
                     continue
+                if not isinstance(literal_unroll_call, ir.Expr):
+                    continue
+                if literal_unroll_call.op != "call":
+                    continue
                 literal_func = getattr(literal_unroll_call, 'func', None)
                 if not literal_func:
                     continue
