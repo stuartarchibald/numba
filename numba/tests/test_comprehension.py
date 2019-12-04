@@ -372,10 +372,10 @@ class TestArrayComprehension(unittest.TestCase):
         # test is expected to fail
         with self.assertRaises(TypingError) as raises:
             self.check(comp_nest_with_dependency, 5)
-        self.assertIn(
-            'Invalid use of Function({})'.format(operator.setitem),
-            str(raises.exception),
-        )
+        self.assertIn('Cannot infer the type of variable',
+                      str(raises.exception))
+        self.assertIn('have imprecise type: array(undefined',
+                      str(raises.exception))
 
     @tag('important')
     def test_no_array_comp(self):

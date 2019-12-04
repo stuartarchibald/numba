@@ -146,9 +146,10 @@ class TestTypingError(unittest.TestCase):
             compile_isolated(using_imprecise_list, ())
 
         errmsg = str(raises.exception)
-        self.assertRegexpMatches(
-            errmsg, r"Undecided type \$[^\s]+ := <undecided>",
-        )
+        self.assertIn("have imprecise type: list(undefined)", errmsg)
+        msg = ("For Numba to be able to compile a list, the list must have a "
+               "known")
+        self.assertIn(msg, errmsg)
 
     def test_array_setitem_invalid_cast(self):
         with self.assertRaises(TypingError) as raises:
