@@ -15,8 +15,11 @@ from numba.typed_passes import (NopythonTypeInference, IRLegalization,
                                 NoPythonBackend, PartialTypeInference)
 from numba.ir_utils import (compute_cfg_from_blocks, find_topo_order,
                             flatten_labels)
+from .support import PY2
 
+skip_py2 = unittest.skipIf(PY2, "Unsupported on Python 2")
 
+@skip_py2
 class TestLiteralTupleInterpretation(MemoryLeakMixin, TestCase):
 
     def check(self, func, var):
@@ -82,7 +85,7 @@ class ResetTypeInfo(FunctionPass):
         state.calltypes = None
         return True
 
-
+@skip_py2
 class TestLoopCanonicalisation(MemoryLeakMixin, TestCase):
 
     def get_pipeline(use_canonicaliser, use_partial_typing=False):
@@ -414,7 +417,7 @@ class TestLoopCanonicalisation(MemoryLeakMixin, TestCase):
         self.assertEqual(len(ignore_loops_fndesc.calltypes) + 3 * 3,
                          len(canonicalise_loops_fndesc.calltypes))
 
-
+@skip_py2
 class TestMixedTupleUnroll(MemoryLeakMixin, TestCase):
 
     def test_01(self):
@@ -887,6 +890,8 @@ class TestMixedTupleUnroll(MemoryLeakMixin, TestCase):
 
         self.assertEqual(foo(), foo.py_func())
 
+
+@skip_py2
 class TestConstListUnroll(MemoryLeakMixin, TestCase):
 
     def test_01(self):

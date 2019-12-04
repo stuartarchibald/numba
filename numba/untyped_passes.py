@@ -845,8 +845,8 @@ class MixedContainerUnroller(FunctionPass):
             # does not conform to the following then raise
 
             # scan loop header
-            iternexts = [
-                *func_ir.blocks[loop.header].find_exprs('iternext')]
+            iternexts = [_ for _ in
+                         func_ir.blocks[loop.header].find_exprs('iternext')]
             if len(iternexts) != 1:
                 return False
             for iternext in iternexts:
@@ -1052,7 +1052,8 @@ class MixedContainerUnroller(FunctionPass):
         blks = state.func_ir.blocks
         orig_lbl = tuple(this_loop_body)
         data = unrolled_body, this_loop.header
-        replace, *delete = orig_lbl
+        # python 2 can't star unpack
+        replace, delete = orig_lbl[0], orig_lbl[1:]
         unroll, header_block = data
         unroll_lbl = [x for x in sorted(unroll.blocks.keys())]
         blks[replace] = unroll.blocks[unroll_lbl[0]]
@@ -1176,7 +1177,8 @@ class IterLoopCanonicalization(FunctionPass):
         # - the iternext value is a phi derived from getiter()
 
         # check header
-        iternexts = [*func_ir.blocks[loop.header].find_exprs('iternext')]
+        iternexts = [_ for _ in
+                     func_ir.blocks[loop.header].find_exprs('iternext')]
         if len(iternexts) != 1:
             return False
         for iternext in iternexts:
@@ -1215,7 +1217,8 @@ class IterLoopCanonicalization(FunctionPass):
         def get_range(a):
             return range(len(a))
 
-        iternext = [*func_ir.blocks[loop.header].find_exprs('iternext')][0]
+        iternext = [_ for _ in
+                    func_ir.blocks[loop.header].find_exprs('iternext')][0]
         LOC = func_ir.blocks[loop.header].loc
         get_range_var = ir.Var(func_ir.blocks[loop.header].scope,
                                mk_unique_var('get_range_gbl'), LOC)

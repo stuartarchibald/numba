@@ -36,8 +36,8 @@ def dump(header, body):
             from pygments import highlight
             from pygments.lexers import GasLexer as lexer
             from pygments.formatters import Terminal256Formatter
-            def printer(*args):
-                print(highlight(*args, lexer(),
+            def printer(arg):
+                print(highlight(arg, lexer(),
                       Terminal256Formatter(style='solarized-light')))
     else:
         printer = print
