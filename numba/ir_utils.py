@@ -2120,7 +2120,9 @@ def convert_code_obj_to_function(code_obj, caller_ir):
             d = [caller_ir.get_definition(x).value for x in kwarg_defaults]
             kwarg_defaults_tup = tuple(d)
         else:
-            kwarg_defaults_tup = kwarg_defaults.value
+            d = [caller_ir.get_definition(x).value
+                 for x in kwarg_defaults.items]
+            kwarg_defaults_tup = tuple(d)
         n_kwargs = len(kwarg_defaults_tup)
     nargs = n_allargs - n_kwargs
 

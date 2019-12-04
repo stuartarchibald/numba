@@ -437,8 +437,8 @@ class MakeFunctionToJitFunction(FunctionPass):
                     if isinstance(stmt.value, ir.Expr):
                         if stmt.value.op == "make_function":
                             node = stmt.value
-                            kw_default = guard(
-                                get_definition, func_ir,  node.defaults)
+                            getdef = func_ir.get_definition
+                            kw_default = getdef(node.defaults)
                             ok = False
                             if (kw_default is None or
                                     isinstance(kw_default, ir.Const)):
@@ -446,8 +446,13 @@ class MakeFunctionToJitFunction(FunctionPass):
                             elif isinstance(kw_default, tuple):
                                 ok = all([isinstance(getdef(x), ir.Const)
                                           for x in kw_default])
-
+                            elif isinstance(kw_default, ir.Expr):
+                                if kw_default.op != "build_tuple":
+                                    continue
+                                ok = all([isinstance(getdef(x), ir.Const)
+                                        for x in kw_default.items])
                             if not ok:
+                                print("NOT OK")
                                 continue
 
                             pyfunc = convert_code_obj_to_function(node, func_ir)
