@@ -769,7 +769,16 @@ class Interpreter(object):
         for inst in self.current_block.body:
             if isinstance(inst, ir.Assign) and inst.target is keyvar:
                 self.current_block.remove(inst)
-                keytup = inst.value.value
+                # scan up the block looking for the values, remove them
+                # and find their name strings
+                named_items = []
+                for x in inst.value.items:
+                    for y in self.current_block.body[::-1]:
+                        if x == y.target:
+                            self.current_block.remove(y)
+                            named_items.append(y.value.value)
+                            break
+                keytup = named_items
                 break
         assert len(keytup) == len(values)
         keyconsts = [ir.Const(value=x, loc=self.loc) for x in keytup]
