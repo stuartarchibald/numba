@@ -1087,7 +1087,11 @@ http://numba.pydata.org/numba-doc/latest/user/troubleshoot.html#my-code-has-an-u
                 loc = getattr(offender, 'loc', ir.unknown_loc)
                 # is this an untyped list? try and provide help
                 extra_msg = diagnose_imprecision(offender)
-                raise TypingError(msg % (var, istmp, tp, extra_msg), loc)
+                if raise_errors:
+                    raise TypingError(msg % (var, istmp, tp, extra_msg), loc)
+                else:
+                    typdict[var] = types.unknown
+                    return
             else:  # type is precise, hold it
                 typdict[var] = tp
 

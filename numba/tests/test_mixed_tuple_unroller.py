@@ -886,6 +886,38 @@ class TestMixedTupleUnroll(MemoryLeakMixin, TestCase):
 
         self.assertEqual(foo(), foo.py_func())
 
+    def test_19(self):
+        # mixed bag of refcounted
+        @njit
+        def foo():
+            acc = 0
+            l1 = [1, 2, 3, 4]
+            l2 = [10, 20]
+            tup = (l1, l2)
+            a1 = np.arange(20)
+            a2 = np.ones(5, dtype=np.complex128)
+            tup = (l1, a1, l2, a2)
+            for t in literal_unroll(tup):
+                acc += len(t)
+            return acc
+
+        self.assertEqual(foo(), foo.py_func())
+
+    def test_20(self):
+        # testing partial type inference survives as the list append in the
+        # unrolled version is full inferable
+        @njit
+        def foo():
+            l = []
+            a1 = np.arange(20)
+            a2 = np.ones(5, dtype=np.complex128)
+            tup = (a1, a2)
+            for t in literal_unroll(tup):
+                l.append(t.sum())
+            return l
+
+        self.assertEqual(foo(), foo.py_func())
+
 
 @skip_lt_py36
 class TestConstListUnroll(MemoryLeakMixin, TestCase):
