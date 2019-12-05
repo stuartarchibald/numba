@@ -11,7 +11,7 @@ from .imputils import (lower_builtin, lower_getattr_generic, lower_cast,
                        iternext_impl, impl_ret_borrowed, impl_ret_untracked,
                        RefType)
 from .. import typing, types, cgutils
-from ..extending import overload_method, overload
+from ..extending import overload_method, overload, intrinsic
 
 
 @lower_builtin(types.NamedTupleClass, types.VarArg(types.Any))
@@ -56,19 +56,33 @@ def tuple_cmp_ordered(context, builder, op, sig, args):
     builder.position_at_end(bbend)
     return builder.load(res)
 
+
+@intrinsic
+def tuple_eq(tyctx, a, b):
+    def codegen(cgctx, builder, sig, args):
+        tu, tv = sig.args
+        u, v = args
+        if len(tu.types) != len(tv.types):
+            res = cgctx.get_constant(types.boolean, False)
+            return impl_ret_untracked(cgctx, builder, sig.return_type, res)
+        res = cgctx.get_constant(types.boolean, True)
+        for i, (ta, tb) in enumerate(zip(tu.types, tv.types)):
+            a = builder.extract_value(u, i)
+            b = builder.extract_value(v, i)
+            pred = cgctx.generic_compare(builder, operator.eq, (ta, tb),
+                                           (a, b))
+            res = builder.and_(res, pred)
+        return impl_ret_untracked(cgctx, builder, sig.return_type, res)
+    sig = types.boolean(a, b)
+    return sig, codegen
+
 @overload(operator.eq)
 def ol_tuple_eq(a, b):
     a_tup = isinstance(a, types.BaseTuple)
     b_tup = isinstance(b, types.BaseTuple)
     if a_tup and b_tup:
         def impl(a, b):
-            if len(a) != len(b):
-                return False
-            for x, y in zip(a, b):
-                print(x, y)
-                if x != y:
-                    return False
-            return True
+            return tuple_eq(a, b)
         return impl
     elif a_tup ^ b_tup:
         def impl(a, b):
