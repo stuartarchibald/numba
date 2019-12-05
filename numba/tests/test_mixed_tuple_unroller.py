@@ -8,16 +8,15 @@ from numba.testing import unittest
 from numba.extending import overload
 from numba.compiler_machinery import PassManager, register_pass, FunctionPass
 from numba.compiler import CompilerBase
-from numba.untyped_passes import (TranslateByteCode, FixupArgs, IRProcessing,
-                                  SimplifyCFG, IterLoopCanonicalization,
-                                  MixedContainerUnroller)
+from numba.untyped_passes import (TranslateByteCode, IRProcessing,
+                                  SimplifyCFG, IterLoopCanonicalization)
 from numba.typed_passes import (NopythonTypeInference, IRLegalization,
                                 NoPythonBackend, PartialTypeInference)
-from numba.ir_utils import (compute_cfg_from_blocks, find_topo_order,
-                            flatten_labels)
+from numba.ir_utils import (compute_cfg_from_blocks, flatten_labels)
 from .support import PY2
 
 skip_py2 = unittest.skipIf(PY2, "Unsupported on Python 2")
+
 
 @skip_py2
 class TestLiteralTupleInterpretation(MemoryLeakMixin, TestCase):
@@ -84,6 +83,7 @@ class ResetTypeInfo(FunctionPass):
         state.return_type = None
         state.calltypes = None
         return True
+
 
 @skip_py2
 class TestLoopCanonicalisation(MemoryLeakMixin, TestCase):
@@ -417,6 +417,7 @@ class TestLoopCanonicalisation(MemoryLeakMixin, TestCase):
         self.assertEqual(len(ignore_loops_fndesc.calltypes) + 3 * 3,
                          len(canonicalise_loops_fndesc.calltypes))
 
+
 @skip_py2
 class TestMixedTupleUnroll(MemoryLeakMixin, TestCase):
 
@@ -529,7 +530,6 @@ class TestMixedTupleUnroll(MemoryLeakMixin, TestCase):
         @njit
         def foo(tup):
             acc = 0
-            idx = 0
             str_buf = typed.List.empty_list(types.unicode_type)
             for a in literal_unroll(tup):
                 if a == 'a':
@@ -575,7 +575,6 @@ class TestMixedTupleUnroll(MemoryLeakMixin, TestCase):
                 return x
             return njit(impl)
 
-        n = 10
         tup1 = ('a', 'b', 'c', 12, 3j, ('f',))
         tup2 = (gen(1), gen(2), gen(3))
         self.assertEqual(foo(tup1, tup2), foo.py_func(tup1, tup2))
@@ -609,7 +608,6 @@ class TestMixedTupleUnroll(MemoryLeakMixin, TestCase):
         def func3():
             return 3
 
-        n = 10
         tup1 = ('a', 'b', 'c')
         tup2 = (1j, 1, 2)
 
@@ -875,7 +873,6 @@ class TestMixedTupleUnroll(MemoryLeakMixin, TestCase):
 
         self.assertEqual(foo(), foo.py_func())
 
-
     def test_18(self):
         # unituple backwards slice
         @njit
@@ -965,7 +962,6 @@ class TestConstListUnroll(MemoryLeakMixin, TestCase):
 
         self.assertEqual(foo(), foo.py_func())
 
-
     def test_05(self):
         # fine, list has to be homogeneous in dtype as its an arg
         @njit
@@ -993,7 +989,7 @@ class TestConstListUnroll(MemoryLeakMixin, TestCase):
         def foo():
             n = 10
             tup = [np.ones((n,)), np.ones((n, n)), "ABCDEFGHJI", (1, 2, 3),
-                (1, 'foo', 2, 'bar'), {3, 4, 5, 6, 7}]
+                   (1, 'foo', 2, 'bar'), {3, 4, 5, 6, 7}]
             acc = 0
             for a in literal_unroll(tup):
                 acc += len(a)
@@ -1147,8 +1143,6 @@ class TestConstListUnroll(MemoryLeakMixin, TestCase):
                 acc += bool(a)
             return a
 
-        n = 5
-
         with self.assertRaises(errors.TypingError) as raises:
             foo()
 
@@ -1169,6 +1163,7 @@ class TestConstListUnroll(MemoryLeakMixin, TestCase):
             foo()
 
         self.assertIn("Invalid use of literal_unroll", str(raises.exception))
+
 
 @unittest.skipIf(not PY2, "Python 2 only test")
 class TestLiteralUnrollPy2(TestCase):

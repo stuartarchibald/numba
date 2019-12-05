@@ -561,7 +561,8 @@ class TransformLiteralUnrollConstListToTuple(FunctionPass):
                                                               to_unroll.loc)
                         else:
                             if isinstance(to_unroll, ir.Expr):
-                                if to_unroll.op == "getitem": # probably a slice
+                                # probably a slice
+                                if to_unroll.op == "getitem":
                                     ty = state.typemap[to_unroll.value.name]
                                     if isinstance(ty, self._accepted_types):
                                         # this is fine, its a tuple slice
@@ -899,8 +900,8 @@ class MixedContainerUnroller(FunctionPass):
                         blk = func_ir.blocks[lbl]
                         for stmt in blk.body:
                             if isinstance(stmt, ir.Assign):
-                                if isinstance(
-                                        stmt.value, ir.Expr) and stmt.value.op == "getitem":
+                                if (isinstance(stmt.value, ir.Expr) and
+                                        stmt.value.op == "getitem"):
                                     # check for something like a[i]
                                     if stmt.value.value != arg:
                                         # that failed, so check for the
@@ -1252,7 +1253,6 @@ class IterLoopCanonicalization(FunctionPass):
         entry_block.body.insert(idx, assgn_call)
         entry_block.body[idx + 1].value.value = call_get_range_var
 
-        f = compile_to_numba_ir(get_range, {})
         glbls = copy(func_ir.func_id.func.__globals__)
         inline_closure_call(func_ir, glbls, entry_block, idx, get_range,)
         kill = entry_block.body.index(assgn)
@@ -1296,7 +1296,6 @@ class IterLoopCanonicalization(FunctionPass):
         loops = cfg.loops()
 
         mutated = False
-        accepted_loops = []
         for header, loop in loops.items():
             stat = self.assess_loop(loop, func_ir, state.typemap)
             if stat:

@@ -195,10 +195,9 @@ class TestIrUtils(TestCase):
         self.assertEqual(const_b, GLOBAL_B)
         self.assertEqual(const_c, FREEVAR_C)
 
-
     def test_flatten_labels(self):
         """ tests flatten_labels """
-        def foo():
+        def foo(a):
             acc = 0
             if a > 3:
                 acc += 1
@@ -217,7 +216,7 @@ class TestIrUtils(TestCase):
                 raise ValueError("some string")
             return acc
 
-        def bar():
+        def bar(a):
             acc = 0
             z = 12
             if a > 3:
@@ -242,7 +241,7 @@ class TestIrUtils(TestCase):
                 raise ValueError("some string")
             return acc
 
-        def baz():
+        def baz(a):
             acc = 0
             if a > 3:
                 acc += 1
@@ -262,7 +261,6 @@ class TestIrUtils(TestCase):
             else:
                 raise ValueError("some string")
             return acc
-
 
         def get_flat_cfg(func):
             func_ir = ir_utils.compile_to_numba_ir(func, dict())

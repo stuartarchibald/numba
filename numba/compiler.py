@@ -20,15 +20,12 @@ from .untyped_passes import (ExtractByteCode, TranslateByteCode, FixupArgs,
                              RewriteSemanticConstants, InlineClosureLikes,
                              GenericRewrites, WithLifting, InlineInlinables,
                              FindLiterallyCalls, MakeFunctionToJitFunction,
-                             MixedContainerUnroller, IterLoopCanonicalization,
-                             TransformLiteralUnrollConstListToTuple,
                              LiteralUnroll)
 
 from .typed_passes import (NopythonTypeInference, AnnotateTypes,
                            NopythonRewrites, PreParforPass, ParforPass,
                            DumpParforDiagnostics, IRLegalization,
-                           NoPythonBackend, InlineOverloads,
-                           PartialTypeInference)
+                           NoPythonBackend, InlineOverloads)
 
 from .object_mode_passes import (ObjectModeFrontEnd, ObjectModeBackEnd,
                                  CompileInterpMode)
@@ -137,7 +134,7 @@ class CompileResult(namedtuple("_CompileResult", CR_FIELDS)):
                  lifted=lifted,
                  typing_error=None,
                  call_helper=None,
-                 metadata=None,  # Do not store, arbitrary and potentially large!
+                 metadata=None,  # Do not store, arbitrary & potentially large!
                  reload_init=reload_init,
                  )
         return cr

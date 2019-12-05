@@ -190,16 +190,15 @@ class BaseLower(object):
             print(("LLVM DUMP %s" % self.fndesc).center(80, '-'))
             if config.HIGHLIGHT_DUMPS:
                 try:
-                    import pygments
-                except ImportError:
-                    msg = "Please install pygments to see highlighted dumps"
-                    raise ValueError(msg)
-                else:
                     from pygments import highlight
                     from pygments.lexers import LlvmLexer as lexer
                     from pygments.formatters import Terminal256Formatter
                     print(highlight(self.module.__repr__(), lexer(),
-                                    Terminal256Formatter(style='solarized-light')))
+                                    Terminal256Formatter(
+                                        style='solarized-light')))
+                except ImportError:
+                    msg = "Please install pygments to see highlighted dumps"
+                    raise ValueError(msg)
             else:
                 print(self.module)
             print('=' * 80)
@@ -1073,7 +1072,8 @@ class Lower(BaseLower):
                 self.typeof(expr.index.name),
             )
             impl = self.context.get_function("typed_getitem", signature)
-            return impl(self.builder, (self.loadvar(expr.value.name), self.loadvar(expr.index.name)))
+            return impl(self.builder, (self.loadvar(expr.value.name),
+                        self.loadvar(expr.index.name)))
         elif expr.op == "getitem":
             signature = self.fndesc.calltypes[expr]
             return self.lower_getitem(resty, expr, expr.value, expr.index,

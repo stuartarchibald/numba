@@ -412,6 +412,7 @@ class TypedGetItemConstraint(object):
     def get_call_signature(self):
         return self.signature
 
+
 def fold_arg_vars(typevars, args, vararg, kws):
     """
     Fold and resolve the argument variables of a function call.
@@ -637,6 +638,7 @@ class SetItemRefinement(object):
     """A mixin class to provide the common refinement logic in setitem
     and static setitem.
     """
+
     def _refine_target_type(self, typeinfer, targetty, idxty, valty, sig):
         """Refine the target-type given the known index type and value type.
         """
@@ -1018,7 +1020,7 @@ class TypeInferer(object):
                 if offender is not None:
                     if not exhaustive:
                         break
-                    try: # simple assignment
+                    try:  # simple assignment
                         hasattr(offender.value, 'name')
                         offender_value = offender.value.name
                     except (AttributeError, KeyError):
@@ -1052,7 +1054,7 @@ http://numba.pydata.org/numba-doc/latest/user/troubleshoot.html#my-code-has-an-u
                             return list_msg
                         # or might be `foo = list()`
                         elif offender.value.op == 'call':
-                            try: # assignment involving a call
+                            try:  # assignment involving a call
                                 call_name = offender.value.func.name
                                 # find the offender based on the call name
                                 offender = find_offender(call_name)
@@ -1061,7 +1063,7 @@ http://numba.pydata.org/numba-doc/latest/user/troubleshoot.html#my-code-has-an-u
                                         return list_msg
                             except (AttributeError, KeyError):
                                 pass
-            return "" # no help possible
+            return ""  # no help possible
 
         def check_var(name):
             tv = self.typevars[name]
@@ -1086,7 +1088,7 @@ http://numba.pydata.org/numba-doc/latest/user/troubleshoot.html#my-code-has-an-u
                 # is this an untyped list? try and provide help
                 extra_msg = diagnose_imprecision(offender)
                 raise TypingError(msg % (var, istmp, tp, extra_msg), loc)
-            else: # type is precise, hold it
+            else:  # type is precise, hold it
                 typdict[var] = tp
 
         # For better error display, check first user-visible vars, then
@@ -1400,7 +1402,7 @@ http://numba.pydata.org/numba-doc/latest/user/troubleshoot.html#my-code-has-an-u
             else:
                 nm = gvar.name
                 msg = _termcolor.errmsg("Untyped global name '%s':" % nm)
-                msg += " %s" # interps the actual error
+                msg += " %s"  # interps the actual error
 
                 # if the untyped global is a numba internal function then add
                 # to the error message asking if it's been imported.
@@ -1478,9 +1480,9 @@ http://numba.pydata.org/numba-doc/latest/user/troubleshoot.html#my-code-has-an-u
                                        expr.value, expr.index,)
         elif expr.op == 'typed_getitem':
             constraint = TypedGetItemConstraint(target.name, value=expr.value,
-                                                 dtype=expr.dtype,
-                                                 index=expr.index,
-                                                 loc=expr.loc)
+                                                dtype=expr.dtype,
+                                                index=expr.index,
+                                                loc=expr.loc)
             self.constraints.append(constraint)
             self.calls.append((inst.value, constraint))
 

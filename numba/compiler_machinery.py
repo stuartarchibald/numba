@@ -179,8 +179,9 @@ class PassManager(object):
         self.pipeline_name = pipeline_name
 
     def _validate_pass(self, pass_cls):
-        if (not (isinstance(pass_cls, str) or (inspect.isclass(pass_cls) and
-                                               issubclass(pass_cls, CompilerPass)))):
+        if (not (isinstance(pass_cls, str) or
+                 (inspect.isclass(pass_cls) and
+                  issubclass(pass_cls, CompilerPass)))):
             msg = ("Pass must be referenced by name or be a subclass of a "
                    "CompilerPass. Have %s" % pass_cls)
             raise TypeError(msg)
