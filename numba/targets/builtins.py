@@ -83,6 +83,24 @@ def const_ne_impl(context, builder, sig, args):
     res = ir.Constant(ir.IntType(1), val)
     return impl_ret_untracked(context, builder, sig.return_type, res)
 
+
+def gen_non_eq(val):
+    def none_equality(a, b):
+        a_none = isinstance(a, types.NoneType)
+        b_none = isinstance(b, types.NoneType)
+        if a_none and b_none:
+            def impl(a, b):
+                return val
+            return impl
+        elif a_none ^ b_none:
+            def impl(a, b):
+                return not val
+            return impl
+    return none_equality
+
+overload(operator.eq)(gen_non_eq(True))
+overload(operator.ne)(gen_non_eq(False))
+
 #-------------------------------------------------------------------------------
 
 @lower_getattr_generic(types.DeferredType)

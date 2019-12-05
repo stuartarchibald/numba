@@ -438,10 +438,17 @@ def unicode_eq(a, b):
 
 @overload(operator.ne)
 def unicode_ne(a, b):
-    if isinstance(a, types.UnicodeType) and isinstance(b, types.UnicodeType):
+    a_unicode = isinstance(a, (types.UnicodeType, types.StringLiteral))
+    b_unicode = isinstance(b, (types.UnicodeType, types.StringLiteral))
+    if a_unicode and b_unicode:
         def ne_impl(a, b):
             return not (a == b)
         return ne_impl
+    elif a_unicode ^ b_unicode:
+        # one of the things is unicode, everything compares True
+        def eq_impl(a, b):
+            return True
+        return eq_impl
 
 
 @overload(operator.lt)
