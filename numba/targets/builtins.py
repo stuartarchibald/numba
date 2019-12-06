@@ -83,68 +83,6 @@ def const_ne_impl(context, builder, sig, args):
     res = ir.Constant(ir.IntType(1), val)
     return impl_ret_untracked(context, builder, sig.return_type, res)
 
-# this generates == and != for comparisons where the types may not be comparable
-# or might involve none etc.
-def gen_eq_ne(op, TF):
-
-    @intrinsic
-    def cast_check(tyctx, ty_a, ty_b):
-        accept = (Conversion.exact, Conversion.promote, Conversion.safe)
-        sig = types.boolean(ty_a, ty_b)
-        fnty = tyctx.resolve_value_type(op)
-
-        try:
-            unified = tyctx.unify_types(ty_a, ty_b)
-            if isinstance(unified, types.Optional): # need a concrete type
-                raise TypingError("Concrete type required")
-        except TypingError:
-            unified = None
-
-        # can convert, go get a function to do the comparison and call that
-        # on the casted inputs
-        if unified:
-            def impl(cgctx, builder, sig, args):
-                opsig = fnty.get_call_type(tyctx, (unified, unified), {})
-                impl = cgctx.get_function(fnty, opsig)
-                a_cast = cgctx.cast(builder, args[0], sig.args[0], unified)
-                b_cast = cgctx.cast(builder, args[1], sig.args[1], unified)
-                return impl(builder, (a_cast, b_cast))
-        else:
-            # cannot convert, return false
-            def impl(cgctx, builder, sig, args):
-                if TF:
-                    return cgutils.false_bit
-                else:
-                    return cgutils.true_bit
-        return sig, impl
-
-    def ol_equality(a, b):
-
-        def is_ty(x, ty):
-            return isinstance(x, ty)
-
-
-        a_none = is_ty(a, (types.NoneType,))
-        b_none = is_ty(b, (types.NoneType,))
-        if a_none and b_none: # none compared against none is valid
-            def impl(a, b):
-                return TF
-            return impl
-
-        accepted = (types.Number, types.Boolean, types.UnicodeType,
-                    types.NoneType, types.Tuple, types.UniTuple)
-        if isinstance(a, accepted) and isinstance(b, accepted):
-            if a != b:
-                def impl(a, b):
-                    return cast_check(a, b)
-                return impl
-
-    return ol_equality
-
-overload(operator.eq)(gen_eq_ne(operator.eq, True))
-overload(operator.ne)(gen_eq_ne(operator.ne, False))
-
-
 #-------------------------------------------------------------------------------
 
 @lower_getattr_generic(types.DeferredType)

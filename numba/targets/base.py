@@ -708,7 +708,7 @@ class BaseContext(object):
         cbv = self.cast(builder, bv, bt, ty)
         fnty = self.typing_context.resolve_value_type(key)
         # the sig is homogeneous in the unified casted type
-        cmpsig = fnty.get_call_type(self.typing_context, (ty, ty), {})
+        cmpsig = fnty.get_call_type(self.typing_context, argtypes, {})
         cmpfunc = self.get_function(fnty, cmpsig)
         self.add_linking_libs(getattr(cmpfunc, 'libs', ()))
         return cmpfunc(builder, (cav, cbv))

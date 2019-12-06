@@ -421,11 +421,18 @@ def unicode_len(s):
 
 @overload(operator.eq)
 def unicode_eq(a, b):
-    if isinstance(a, types.UnicodeType) and isinstance(b, types.UnicodeType):
+    a_unicode = isinstance(a, (types.UnicodeType, types.StringLiteral))
+    b_unicode = isinstance(b, (types.UnicodeType, types.StringLiteral))
+    if a_unicode and b_unicode:
         def eq_impl(a, b):
             if len(a) != len(b):
                 return False
             return _cmp_region(a, 0, b, 0, len(a)) == 0
+        return eq_impl
+    elif a_unicode ^ b_unicode:
+        # one of the things is unicode, everything compares False
+        def eq_impl(a, b):
+            return False
         return eq_impl
 
 
