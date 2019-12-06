@@ -56,50 +56,26 @@ def tuple_cmp_ordered(context, builder, op, sig, args):
     builder.position_at_end(bbend)
     return builder.load(res)
 
-@intrinsic
-def tuple_eq(tyctx, a, b):
-    def codegen(cgctx, builder, sig, args):
-        tu, tv = sig.args
-        u, v = args
-        if len(tu.types) != len(tv.types):
-            res = cgctx.get_constant(types.boolean, False)
-            return impl_ret_untracked(cgctx, builder, sig.return_type, res)
-        res = cgctx.get_constant(types.boolean, True)
-        for i, (ta, tb) in enumerate(zip(tu.types, tv.types)):
-            a = builder.extract_value(u, i)
-            b = builder.extract_value(v, i)
-            pred = cgctx.generic_compare(builder, operator.eq, (ta, tb),
-                                           (a, b))
-            res = builder.and_(res, pred)
-        return impl_ret_untracked(cgctx, builder, sig.return_type, res)
-    sig = types.boolean(a, b)
-    return sig, codegen
 
-@overload(operator.eq)
-def ol_tuple_eq(a, b):
-    a_tup = isinstance(a, types.BaseTuple)
-    b_tup = isinstance(b, types.BaseTuple)
-    if a_tup and b_tup:
-        def impl(a, b):
-            return tuple_eq(a, b)
-        return impl
-    elif a_tup ^ b_tup:
-        def impl(a, b):
-            return False
-        return impl
+@lower_builtin(operator.eq, types.BaseTuple, types.BaseTuple)
+def tuple_eq(context, builder, sig, args):
+    tu, tv = sig.args
+    u, v = args
+    if len(tu.types) != len(tv.types):
+        res = context.get_constant(types.boolean, False)
+        return impl_ret_untracked(context, builder, sig.return_type, res)
+    res = context.get_constant(types.boolean, True)
+    for i, (ta, tb) in enumerate(zip(tu.types, tv.types)):
+        a = builder.extract_value(u, i)
+        b = builder.extract_value(v, i)
+        pred = context.generic_compare(builder, operator.eq, (ta, tb), (a, b))
+        res = builder.and_(res, pred)
+    return impl_ret_untracked(context, builder, sig.return_type, res)
 
-@overload(operator.ne)
-def ol_tuple_ne(a, b):
-    a_tup = isinstance(a, types.BaseTuple)
-    b_tup = isinstance(b, types.BaseTuple)
-    if a_tup and b_tup:
-        def impl(a, b):
-            return not (a == b)
-        return impl
-    elif a_tup ^ b_tup:
-        def impl(a, b):
-            return True
-        return impl
+@lower_builtin(operator.ne, types.BaseTuple, types.BaseTuple)
+def tuple_ne(context, builder, sig, args):
+    res = builder.not_(tuple_eq(context, builder, sig, args))
+    return impl_ret_untracked(context, builder, sig.return_type, res)
 
 @lower_builtin(operator.lt, types.BaseTuple, types.BaseTuple)
 def tuple_lt(context, builder, sig, args):

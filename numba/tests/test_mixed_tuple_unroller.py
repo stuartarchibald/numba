@@ -511,15 +511,13 @@ class TestMixedTupleUnroll(MemoryLeakMixin, TestCase):
                 elif a == 12:
                     acc += tup2[3].sum()
                 elif a == 3j:
-                    acc += tup2[3].sum()
-                elif a == ('f',):
-                    acc += tup2[3].sum()
+                    acc += tup2[4].sum()
                 else:
                     raise RuntimeError("Unreachable")
             return acc
 
         n = 10
-        tup1 = ('a', 'b', 'c', 12, 3j, ('f',))
+        tup1 = ('a', 'b', 'c', 12, 3j,)
         tup2 = (np.ones((n,)), np.ones((n, n)), np.ones((n, n, n)),
                 np.ones((n, n, n, n)), np.ones((n, n, n, n, n)))
         self.assertEqual(foo(tup1, tup2), foo.py_func(tup1, tup2))

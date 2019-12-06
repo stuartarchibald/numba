@@ -472,12 +472,10 @@ class CmpOpNe(UnorderedCmpOp):
     pass
 
 
-class TupleCompareMagnitude(AbstractTemplate):
+class TupleCompare(AbstractTemplate):
     def generic(self, args, kws):
         [lhs, rhs] = args
-        lhs_tuple = isinstance(lhs, types.BaseTuple)
-        rhs_tuple = isinstance(rhs, types.BaseTuple)
-        if lhs_tuple and rhs_tuple:
+        if isinstance(lhs, types.BaseTuple) and isinstance(rhs, types.BaseTuple):
             for u, v in zip(lhs, rhs):
                 # Check element-wise comparability
                 res = self.context.resolve_function_type(self.key, (u, v), {})
@@ -487,23 +485,33 @@ class TupleCompareMagnitude(AbstractTemplate):
                 return signature(types.boolean, lhs, rhs)
 
 
+@infer_global(operator.eq)
+class TupleEq(TupleCompare):
+    pass
+
+
+@infer_global(operator.ne)
+class TupleNe(TupleCompare):
+    pass
+
+
 @infer_global(operator.ge)
-class TupleGe(TupleCompareMagnitude):
+class TupleGe(TupleCompare):
     pass
 
 
 @infer_global(operator.gt)
-class TupleGt(TupleCompareMagnitude):
+class TupleGt(TupleCompare):
     pass
 
 
 @infer_global(operator.le)
-class TupleLe(TupleCompareMagnitude):
+class TupleLe(TupleCompare):
     pass
 
 
 @infer_global(operator.lt)
-class TupleLt(TupleCompareMagnitude):
+class TupleLt(TupleCompare):
     pass
 
 
