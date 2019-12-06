@@ -56,7 +56,6 @@ def tuple_cmp_ordered(context, builder, op, sig, args):
     builder.position_at_end(bbend)
     return builder.load(res)
 
-
 @intrinsic
 def tuple_eq(tyctx, a, b):
     def codegen(cgctx, builder, sig, args):
