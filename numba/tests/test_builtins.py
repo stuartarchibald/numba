@@ -1045,7 +1045,7 @@ class TestOperatorMixedTypes(TestCase):
 
             # all these things should evaluate to being equal or not, all should
             # survive typing.
-            things = (1, 0, True, False, 1.0, 2.0, 1.1, 1j, None, (1,),)
+            things = (1, 0, True, False, 1.0, 2.0, 1.1, 1j, None,)
             if not PY2:
                 things = things + ("", "1")
             for x, y in itertools.product(things, things):
