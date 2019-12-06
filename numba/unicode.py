@@ -421,8 +421,9 @@ def unicode_len(s):
 
 @overload(operator.eq)
 def unicode_eq(a, b):
-    a_unicode = isinstance(a, (types.UnicodeType, types.StringLiteral))
-    b_unicode = isinstance(b, (types.UnicodeType, types.StringLiteral))
+    accept = (types.UnicodeType, types.StringLiteral, types.UnicodeCharSeq)
+    a_unicode = isinstance(a, accept)
+    b_unicode = isinstance(b, accept)
     if a_unicode and b_unicode:
         def eq_impl(a, b):
             if len(a) != len(b):
@@ -438,8 +439,9 @@ def unicode_eq(a, b):
 
 @overload(operator.ne)
 def unicode_ne(a, b):
-    a_unicode = isinstance(a, (types.UnicodeType, types.StringLiteral))
-    b_unicode = isinstance(b, (types.UnicodeType, types.StringLiteral))
+    accept = (types.UnicodeType, types.StringLiteral, types.UnicodeCharSeq)
+    a_unicode = isinstance(a, accept)
+    b_unicode = isinstance(b, accept)
     if a_unicode and b_unicode:
         def ne_impl(a, b):
             return not (a == b)
