@@ -1,5 +1,6 @@
 from __future__ import print_function, absolute_import, division
 
+import sys
 import numpy as np
 
 from numba.tests.support import TestCase, MemoryLeakMixin
@@ -13,12 +14,12 @@ from numba.untyped_passes import (TranslateByteCode, IRProcessing,
 from numba.typed_passes import (NopythonTypeInference, IRLegalization,
                                 NoPythonBackend, PartialTypeInference)
 from numba.ir_utils import (compute_cfg_from_blocks, flatten_labels)
-from .support import PY2
 
-skip_py2 = unittest.skipIf(PY2, "Unsupported on Python 2")
+_lt_py_36 = sys.version_info[:2] < (3, 6)
+skip_lt_py36 = unittest.skipIf(_lt_py_36, "Unsupported on < Python 3.6")
 
 
-@skip_py2
+@skip_lt_py36
 class TestLiteralTupleInterpretation(MemoryLeakMixin, TestCase):
 
     def check(self, func, var):
@@ -85,7 +86,7 @@ class ResetTypeInfo(FunctionPass):
         return True
 
 
-@skip_py2
+@skip_lt_py36
 class TestLoopCanonicalisation(MemoryLeakMixin, TestCase):
 
     def get_pipeline(use_canonicaliser, use_partial_typing=False):
@@ -418,7 +419,7 @@ class TestLoopCanonicalisation(MemoryLeakMixin, TestCase):
                          len(canonicalise_loops_fndesc.calltypes))
 
 
-@skip_py2
+@skip_lt_py36
 class TestMixedTupleUnroll(MemoryLeakMixin, TestCase):
 
     def test_01(self):
@@ -888,7 +889,7 @@ class TestMixedTupleUnroll(MemoryLeakMixin, TestCase):
         self.assertEqual(foo(), foo.py_func())
 
 
-@skip_py2
+@skip_lt_py36
 class TestConstListUnroll(MemoryLeakMixin, TestCase):
 
     def test_01(self):
@@ -1165,10 +1166,10 @@ class TestConstListUnroll(MemoryLeakMixin, TestCase):
         self.assertIn("Invalid use of literal_unroll", str(raises.exception))
 
 
-@unittest.skipIf(not PY2, "Python 2 only test")
+@unittest.skipIf(not _lt_py_36, "Python < 3.6 only test")
 class TestLiteralUnrollPy2(TestCase):
 
-    def test_py2_not_supported(self):
+    def test_py_lt_36_not_supported(self):
 
         @njit
         def foo():
@@ -1181,7 +1182,7 @@ class TestLiteralUnrollPy2(TestCase):
         with self.assertRaises(errors.TypingError) as raises:
             foo()
 
-        self.assertIn("literal_unroll is not supported in Python 2",
+        self.assertIn("literal_unroll is only support in Python > 3.5",
                       str(raises.exception))
 
 

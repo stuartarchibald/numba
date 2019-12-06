@@ -1,5 +1,7 @@
 from __future__ import print_function, division, absolute_import
 
+import sys
+
 from numba.extending import overload
 import numpy as np
 
@@ -90,19 +92,17 @@ def literally(obj):
 
 
 def literal_unroll(container):
-    from numba.six import PY2
     from numba.errors import UnsupportedError
-    if PY2:
-        raise UnsupportedError("literal_unroll is not supported in Python 2")
+    if sys.version_info[:2] < (3, 6):
+        raise UnsupportedError("literal_unroll is only support in Python > 3.5")
     return container
 
 
 @overload(literal_unroll)
 def literal_unroll_impl(container):
-    from numba.six import PY2
     from numba.errors import UnsupportedError
-    if PY2:
-        raise UnsupportedError("literal_unroll is not supported in Python 2")
+    if sys.version_info[:2] < (3, 6):
+        raise UnsupportedError("literal_unroll is only support in Python > 3.5")
 
     def impl(container):
         return container
