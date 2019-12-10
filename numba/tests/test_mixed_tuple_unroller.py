@@ -972,7 +972,6 @@ class TestMixedTupleUnroll(MemoryLeakMixin, TestCase):
         # unroll in closure that gets inlined
         @njit
         def foo(z):
-            a = (12, 12.7, 3j, 4, z, 2 * z)
             b = (23, 23.9, 6j, 8)
 
             def bar():
@@ -1017,7 +1016,6 @@ class TestMixedTupleUnroll(MemoryLeakMixin, TestCase):
         # unroll from closure that ends up banned as it leads to nesting
         @njit
         def foo(z):
-            a = (12, 12.7, 3j, 4, z, 2 * z)
             b = (23, 23.9, 6j, 8)
 
             def bar():
@@ -1102,7 +1100,6 @@ class TestMixedTupleUnroll(MemoryLeakMixin, TestCase):
         def foo(z):
             a = (12, 12.7, 3j, 4, z, 2 * z)
             acc = 0
-            count = 0
             for x in literal_unroll(a):
                 for k in prange(10):
                     acc += 1
@@ -1120,7 +1117,6 @@ class TestMixedTupleUnroll(MemoryLeakMixin, TestCase):
         def foo(z):
             a = (12, 12.7, 3j, 4, z, 2 * z)
             acc = 0
-            count = 0
             for x in literal_unroll(a):
                 for k in prange(10):
                     acc += x
@@ -1140,7 +1136,6 @@ class TestMixedTupleUnroll(MemoryLeakMixin, TestCase):
         def foo(z):
             a = (12, 12.7, 3j, 4, z, 2 * z)
             acc = 0
-            count = 0
             for k in prange(10):
                 for x in literal_unroll(a):
                     acc += x
