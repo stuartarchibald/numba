@@ -1195,6 +1195,29 @@ class TestMixedTupleUnroll(MemoryLeakMixin, TestCase):
 
         self.assertEqual(foo(), foo.py_func())
 
+    def test_33(self):
+        # test yielding from unroll in escaping function that is consumed and
+        # yields
+
+        @njit
+        def consumer(func, arg):
+            yield func(arg)
+
+        def get(cons):
+            @njit
+            def foo():
+                def gen(a):
+                    for x in literal_unroll(a):
+                        yield x
+                return [next(x) for x in cons(gen, (1, 2.3, 4j,))]
+            return foo
+
+        cfunc = get(consumer)
+        pyfunc = get(consumer.py_func).py_func
+
+        self.assertEqual(cfunc(), pyfunc())
+
+
 @skip_lt_py36
 class TestConstListUnroll(MemoryLeakMixin, TestCase):
 
