@@ -1150,7 +1150,7 @@ http://numba.pydata.org/numba-doc/latest/user/troubleshoot.html#my-code-has-an-u
         yield_types = None
         try:
             yield_types = [typdict[y.inst.value.name]
-                        for y in gi.get_yield_points()]
+                           for y in gi.get_yield_points()]
         except KeyError:
             msg = "Cannot type generator: yield type cannot be found"
             if raise_errors:
@@ -1181,9 +1181,9 @@ http://numba.pydata.org/numba-doc/latest/user/troubleshoot.html#my-code-has-an-u
                     explain_ty.add(ty)
             if raise_errors:
                 raise TypingError("Can't unify yield type from the "
-                                "following types: %s"
-                                % ", ".join(sorted(map(str, explain_ty))) +
-                                "\n\n" + "\n".join(yp_highlights))
+                                  "following types: %s"
+                                  % ", ".join(sorted(map(str, explain_ty))) +
+                                  "\n\n" + "\n".join(yp_highlights))
 
         return types.Generator(self.func_id.func, yield_type, arg_types,
                                state_types, has_finalizer=True)

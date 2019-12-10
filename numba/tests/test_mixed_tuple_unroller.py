@@ -1151,6 +1151,7 @@ class TestMixedTupleUnroll(MemoryLeakMixin, TestCase):
         @njit
         def foo():
             const = 1234
+
             def bar(t):
                 acc = 0
                 a = (12, 12.7, 3j, 4)
@@ -1168,6 +1169,7 @@ class TestMixedTupleUnroll(MemoryLeakMixin, TestCase):
         @njit
         def foo():
             const = 1234
+
             def bar(t):
                 acc = 0
                 a = (12, 12.7, 3j, 4)
