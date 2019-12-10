@@ -405,6 +405,8 @@ def visit_vars_inner(node, callback, cbdata):
         #     node.rhs.name = callback, cbdata.get(rhs, rhs)
         for arg in node._kws.keys():
             node._kws[arg] = visit_vars_inner(node._kws[arg], callback, cbdata)
+    elif isinstance(node, ir.Yield):
+        node.value = visit_vars_inner(node.value, callback, cbdata)
     return node
 
 

@@ -1146,6 +1146,54 @@ class TestMixedTupleUnroll(MemoryLeakMixin, TestCase):
 
         self.assertEqual(foo(k), foo.py_func(k))
 
+    def test_30(self):
+        # function escaping containing an unroll
+        @njit
+        def foo():
+            const = 1234
+            def bar(t):
+                acc = 0
+                a = (12, 12.7, 3j, 4)
+                for x in literal_unroll(a):
+                    acc += x + const
+                return acc, t
+            return [x for x in map(bar, (1, 2))]
+
+        self.assertEqual(foo(), foo.py_func())
+
+    def test_31(self):
+        # this is testing that generators can survive partial typing
+        # invalid function escaping, map uses zip which can't handle the mixed
+        # tuple
+        @njit
+        def foo():
+            const = 1234
+            def bar(t):
+                acc = 0
+                a = (12, 12.7, 3j, 4)
+                for x in literal_unroll(a):
+                    acc += x + const
+                return acc, t
+            return [x for x in map(bar, (1, 2j))]
+
+        with self.assertRaises(errors.TypingError) as raises:
+            foo()
+
+        self.assertIn("Invalid use of", str(raises.exception))
+        self.assertIn("zip", str(raises.exception))
+
+    def test_32(self):
+        # test yielding from an unroll
+        @njit
+        def gen(a):
+            for x in literal_unroll(a):
+                yield x
+
+        @njit
+        def foo():
+            return [x for x in gen((1, 2.3, 4j,))]
+
+        self.assertEqual(foo(), foo.py_func())
 
 @skip_lt_py36
 class TestConstListUnroll(MemoryLeakMixin, TestCase):
