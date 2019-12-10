@@ -1161,6 +1161,11 @@ http://numba.pydata.org/numba-doc/latest/user/troubleshoot.html#my-code-has-an-u
                 raise TypingError(msg)
             yield_types = [types.unknown for _ in gi.get_yield_points()]
 
+        if not yield_types or all(yield_types) == types.unknown:
+            # unknown yield, probably partial type inference, escape
+            return types.Generator(self.func_id.func, types.unknown, arg_types,
+                                   state_types, has_finalizer=True)
+
         yield_type = self.context.unify_types(*yield_types)
         if yield_type is None or isinstance(yield_type, types.Optional):
             msg = "Cannot type generator: cannot unify yielded types %s"
