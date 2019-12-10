@@ -1496,6 +1496,24 @@ class TestConstListUnroll(MemoryLeakMixin, TestCase):
 
         self.assertIn("Invalid use of literal_unroll", str(raises.exception))
 
+    def test_14(self):
+        # list mutate is illegal
+
+        @njit
+        def foo():
+            x = [1000, 2000, 3000, 4000]
+            acc = 0
+            for a in literal_unroll(x):
+                acc += a
+            x.append(10)
+            return acc
+
+        with self.assertRaises(errors.TypingError) as raises:
+            foo()
+
+        self.assertIn("Unknown attribute 'append' of type Tuple",
+                      str(raises.exception))
+
 
 @unittest.skipIf(not _lt_py_36, "Python < 3.6 only test")
 class TestLiteralUnrollPy2(TestCase):
