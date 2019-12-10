@@ -1072,21 +1072,28 @@ class TestMixedTupleUnroll(MemoryLeakMixin, TestCase):
 
     def test_26(self):
         # var defined in unrolled body escapes
+        # untouched variable is untouched
+        # read only variable is only read
+        # mutated is muted correctly
         @njit
         def foo(z):
             a = (12, 12.7, 3j, 4, z, 2 * z)
             acc = 0
             count = 0
+            untouched = 54
+            read_only = 17
+            mutated = np.empty((len(a),), dtype=np.complex128)
             for x in literal_unroll(a):
                 acc += x
+                mutated[count] = x
                 count += 1
-                escape = count
-            return escape, acc
+                escape = count + read_only
+            return escape, acc, untouched, read_only, mutated
 
         f = 9
         k = f
 
-        self.assertEqual(foo(k), foo.py_func(k))
+        self.assertPreciseEqual(foo(k), foo.py_func(k))
 
     @skip_parfors_unsupported
     def test_27(self):
