@@ -560,14 +560,13 @@ class TransformLiteralUnrollConstListToTuple(FunctionPass):
                                 raise errors.UnsupportedError(msg,
                                                               to_unroll.loc)
                         else:
+                            extra = None
                             if isinstance(to_unroll, ir.Expr):
                                 # probably a slice
                                 if to_unroll.op == "getitem":
                                     ty = state.typemap[to_unroll.value.name]
-                                    if isinstance(ty, self._accepted_types):
-                                        # this is fine, its a tuple slice
-                                        extra = None
-                                    else:
+                                    # check if this is a tuple slice
+                                    if not isinstance(ty, self._accepted_types):
                                         extra = "operation %s" % to_unroll.op
                             elif isinstance(to_unroll, ir.Arg):
                                 extra = "non-const argument %s" % to_unroll.name
@@ -885,11 +884,14 @@ class MixedContainerUnroller(FunctionPass):
                 if call_func is None:
                     continue
                 call_func = call_func.value
+
                 if call_func is literal_unroll:
                     assert len(literal_unroll_call.args) == 1
                     arg = literal_unroll_call.args[0]
                     typemap = state.typemap
-                    ty = typemap[arg.name]
+                    resolved_arg = guard(get_definition, func_ir, arg,
+                                         lhs_only=True)
+                    ty = typemap[resolved_arg.name]
                     assert isinstance(ty, self._accepted_types)
                     # loop header is spelled ok, now make sure the body
                     # actually contains a getitem
@@ -933,8 +935,7 @@ class MixedContainerUnroller(FunctionPass):
         if not literal_unroll_info:
             return False
 
-        # Validate loops
-        # 1. must not have any calls to literal_unroll
+        # 1. Validate loops, must not have any calls to literal_unroll
         for test_lbl, test_loop in literal_unroll_info.items():
             for ref_lbl, ref_loop in literal_unroll_info.items():
                 if test_lbl == ref_lbl:  # comparing to self! skip
@@ -944,20 +945,17 @@ class MixedContainerUnroller(FunctionPass):
                     loc = func_ir.blocks[test_loop.loop.header].loc
                     raise errors.UnsupportedError(msg, loc)
 
-        # 2. TODO: Scan for any literal_unroll which is not in a loop, something
-        # has gone wrong/use is incorrect, i.e. `literal_unroll("FOO")` would
-        # be "invalid" as it is used with no effect.
-
-        # 3. Do the unroll, get a loop and process it!
+        # 2. Do the unroll, get a loop and process it!
         lbl, info = literal_unroll_info.popitem()
         self.unroll_loop(state, info)
+
+        # 3. Rebuild the state, the IR has taken a hammering
         func_ir.blocks = simplify_CFG(func_ir.blocks)
         post_proc = postproc.PostProcessor(func_ir)
         post_proc.run()
         if self._DEBUG:
             print('-' * 80 + "END OF PASS, SIMPLIFY DONE")
             func_ir.dump()
-        # rebuild the definitions table, the IR has taken a hammering
         func_ir._definitions = build_definitions(func_ir.blocks)
         return True
 
@@ -1218,11 +1216,14 @@ class IterLoopCanonicalization(FunctionPass):
         def get_range(a):
             return range(len(a))
 
+        def tokenise(x):
+            return mk_unique_var("CANONICALISER_%s" % x)
+
         iternext = [_ for _ in
                     func_ir.blocks[loop.header].find_exprs('iternext')][0]
         LOC = func_ir.blocks[loop.header].loc
         get_range_var = ir.Var(func_ir.blocks[loop.header].scope,
-                               mk_unique_var('get_range_gbl'), LOC)
+                               tokenise('get_range_gbl'), LOC)
         get_range_global = ir.Global('get_range', get_range, LOC)
         assgn = ir.Assign(get_range_global, get_range_var, LOC)
 
@@ -1247,7 +1248,7 @@ class IterLoopCanonicalization(FunctionPass):
 
         # create a range(len(tup)) and inject it
         call_get_range_var = ir.Var(entry_block.scope,
-                                    mk_unique_var('call_get_range'), LOC)
+                                    tokenise('call_get_range'), LOC)
         make_call = ir.Expr.call(get_range_var, (stmt.value.value,), (), LOC)
         assgn_call = ir.Assign(make_call, call_get_range_var, LOC)
         entry_block.body.insert(idx, assgn_call)
@@ -1270,8 +1271,12 @@ class IterLoopCanonicalization(FunctionPass):
         # find aliases of the induction var
         tmp = set()
         for x in induction_vars:
-            tmp.add(func_ir.get_assignee(x, loop.header))
+            try:  # there's not always an alias, e.g. loop from inlined closure
+                tmp.add(func_ir.get_assignee(x, loop.header))
+            except ValueError:
+                pass
         induction_vars |= tmp
+        induction_var_names = set([x.name for x in induction_vars])
 
         # Find the downstream blocks that might reference the induction var
         succ = set()
@@ -1283,7 +1288,12 @@ class IterLoopCanonicalization(FunctionPass):
         for lbl in check_blocks:
             for stmt in func_ir.blocks[lbl].body:
                 if isinstance(stmt, ir.Assign):
-                    if stmt.value in induction_vars:
+                    # check for aliases
+                    try:
+                        lookup = getattr(stmt.value, 'name', None)
+                    except KeyError:
+                        continue
+                    if lookup and lookup in induction_var_names:
                         stmt.value = ir.Expr.getitem(
                             iterarg, stmt.value, stmt.loc)
 

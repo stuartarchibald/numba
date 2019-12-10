@@ -3,14 +3,16 @@ from __future__ import print_function, absolute_import, division
 import sys
 import numpy as np
 
-from numba.tests.support import TestCase, MemoryLeakMixin
-from numba import njit, types, typed, ir, errors, literal_unroll
+from numba.tests.support import (TestCase, MemoryLeakMixin,
+                                 skip_parfors_unsupported)
+from numba import njit, types, typed, ir, errors, literal_unroll, prange
 from numba.testing import unittest
 from numba.extending import overload
 from numba.compiler_machinery import PassManager, register_pass, FunctionPass
 from numba.compiler import CompilerBase
 from numba.untyped_passes import (TranslateByteCode, IRProcessing,
-                                  SimplifyCFG, IterLoopCanonicalization)
+                                  InlineClosureLikes, SimplifyCFG,
+                                  IterLoopCanonicalization)
 from numba.typed_passes import (NopythonTypeInference, IRLegalization,
                                 NoPythonBackend, PartialTypeInference)
 from numba.ir_utils import (compute_cfg_from_blocks, flatten_labels)
@@ -98,6 +100,8 @@ class TestLoopCanonicalisation(MemoryLeakMixin, TestCase):
                 # untyped
                 pm.add_pass(TranslateByteCode, "analyzing bytecode")
                 pm.add_pass(IRProcessing, "processing IR")
+                pm.add_pass(InlineClosureLikes,
+                            "inline calls to locally defined closures")
                 if use_partial_typing:
                     pm.add_pass(PartialTypeInference, "do partial typing")
                 if use_canonicaliser:
@@ -418,12 +422,58 @@ class TestLoopCanonicalisation(MemoryLeakMixin, TestCase):
         self.assertEqual(len(ignore_loops_fndesc.calltypes) + 3 * 3,
                          len(canonicalise_loops_fndesc.calltypes))
 
+    def test_inlined_loops(self):
+        """ Checks a loop appearing from a closure """
+
+        def get_info(pipeline):
+            @njit(pipeline_class=pipeline)
+            def foo(tup):
+                def bar(n):
+                    acc = 0
+                    for i in range(n):
+                        acc += 1
+                    return acc
+
+                acc = 0
+                for i in tup:
+                    acc += i
+                    acc += bar(i)
+
+                return acc
+
+            x = (1, 2, 3)
+            self.assertEqual(foo(x), foo.py_func(x))
+            cres = foo.overloads[foo.signatures[0]]
+            func_ir = cres.metadata['func_ir']
+            return func_ir, cres.fndesc
+
+        ignore_loops_ir, ignore_loops_fndesc = \
+            get_info(self.LoopIgnoringCompiler)
+        canonicalise_loops_ir, canonicalise_loops_fndesc = \
+            get_info(self.LoopCanonicalisingCompiler)
+
+        # check CFG is the same
+        def compare_cfg(a, b):
+            a_cfg = compute_cfg_from_blocks(flatten_labels(a.blocks))
+            b_cfg = compute_cfg_from_blocks(flatten_labels(b.blocks))
+            self.assertEqual(a_cfg, b_cfg)
+
+        compare_cfg(ignore_loops_ir, canonicalise_loops_ir)
+
+        # check there's 2 * N - 1 more call types in the canonicalised one:
+        # The -1 comes from the closure being inlined and and the call removed.
+        # len(tuple arg)
+        # range(of the len() above)
+        # getitem(tuple arg, index)
+        self.assertEqual(len(ignore_loops_fndesc.calltypes) + 5,
+                         len(canonicalise_loops_fndesc.calltypes))
+
 
 @skip_lt_py36
 class TestMixedTupleUnroll(MemoryLeakMixin, TestCase):
 
     def test_01(self):
-
+        # test a case which is already in loop canonical form
         @njit
         def foo(idx, z):
             a = (12, 12.7, 3j, 4, z, 2 * z)
@@ -918,6 +968,182 @@ class TestMixedTupleUnroll(MemoryLeakMixin, TestCase):
 
         self.assertEqual(foo(), foo.py_func())
 
+    def test_21(self):
+        # unroll in closure that gets inlined
+        @njit
+        def foo(z):
+            a = (12, 12.7, 3j, 4, z, 2 * z)
+            b = (23, 23.9, 6j, 8)
+
+            def bar():
+                acc = 0
+                for j in literal_unroll(b):
+                    acc += j
+                return acc
+            outer_acc = 0
+            for x in (1, 2, 3, 4):
+                outer_acc += bar() + x
+
+            return outer_acc
+
+        f = 9
+        k = f
+        self.assertEqual(foo(k), foo.py_func(k))
+
+    def test_22(self):
+        @njit
+        def foo(z):
+            a = (12, 12.7, 3j, 4, z, 2 * z)
+            b = (23, 23.9, 6j, 8)
+
+            def bar():
+                acc = 0
+                for j in literal_unroll(b):
+                    acc += j
+                return acc
+            acc = 0
+            # this loop is induced in `x` but `x` is not used, there is a nest
+            # here by virtue of inlining
+            for x in literal_unroll(a):
+                acc += bar()
+
+            return acc
+
+        f = 9
+        k = f
+        self.assertEqual(foo(k), foo.py_func(k))
+
+    def test_23(self):
+        # unroll from closure that ends up banned as it leads to nesting
+        @njit
+        def foo(z):
+            a = (12, 12.7, 3j, 4, z, 2 * z)
+            b = (23, 23.9, 6j, 8)
+
+            def bar():
+                acc = 0
+                for j in literal_unroll(b):
+                    acc += j
+                return acc
+            outer_acc = 0
+            # this drives an inlined literal_unroll loop but also has access to
+            # the induction variable, this is a nested literal_unroll so is
+            # banned
+            for x in literal_unroll(b):
+                outer_acc += bar() + x
+
+            return outer_acc
+
+        f = 9
+        k = f
+
+        with self.assertRaises(errors.UnsupportedError) as raises:
+            foo(k)
+
+        self.assertIn("Nesting of literal_unroll is unsupported",
+                      str(raises.exception))
+
+    def test_24(self):
+        # unroll something unsupported
+        @njit
+        def foo():
+            for x in literal_unroll("ABCDE"):
+                print(x)
+
+        with self.assertRaises(errors.UnsupportedError) as raises:
+            foo()
+
+        msg = "argument should be a tuple or a list of constant values"
+        self.assertIn(msg, str(raises.exception))
+
+    def test_25(self):
+        # use unroll by reference/alias
+        @njit
+        def foo():
+            val = literal_unroll(((1, 2, 3), (2j, 3j), [1, 2], "xyz"))
+            alias1 = val
+            alias2 = alias1
+            lens = []
+            for x in alias2:
+                lens.append(len(x))
+            return lens
+
+        self.assertEqual(foo(), foo.py_func())
+
+    def test_26(self):
+        # var defined in unrolled body escapes
+        @njit
+        def foo(z):
+            a = (12, 12.7, 3j, 4, z, 2 * z)
+            acc = 0
+            count = 0
+            for x in literal_unroll(a):
+                acc += x
+                count += 1
+                escape = count
+            return escape, acc
+
+        f = 9
+        k = f
+
+        self.assertEqual(foo(k), foo.py_func(k))
+
+    @skip_parfors_unsupported
+    def test_27(self):
+        # parfors loop in unrolled loop
+        @njit(parallel=True)
+        def foo(z):
+            a = (12, 12.7, 3j, 4, z, 2 * z)
+            acc = 0
+            count = 0
+            for x in literal_unroll(a):
+                for k in prange(10):
+                    acc += 1
+            return acc
+
+        f = 9
+        k = f
+
+        self.assertEqual(foo(k), foo.py_func(k))
+
+    @skip_parfors_unsupported
+    def test_28(self):
+        # parfors reducing on the unrolled induction var
+        @njit(parallel=True)
+        def foo(z):
+            a = (12, 12.7, 3j, 4, z, 2 * z)
+            acc = 0
+            count = 0
+            for x in literal_unroll(a):
+                for k in prange(10):
+                    acc += x
+            return acc
+
+        f = 9
+        k = f
+
+        # summation is unstable
+        np.testing.assert_allclose(foo(k), foo.py_func(k))
+
+    @skip_parfors_unsupported
+    def test_29(self):
+        # This "works" but parfors is not producing a parallel loop
+        # TODO: fix
+        @njit(parallel=True)
+        def foo(z):
+            a = (12, 12.7, 3j, 4, z, 2 * z)
+            acc = 0
+            count = 0
+            for k in prange(10):
+                for x in literal_unroll(a):
+                    acc += x
+            return acc
+
+        f = 9
+        k = f
+
+        self.assertEqual(foo(k), foo.py_func(k))
+
 
 @skip_lt_py36
 class TestConstListUnroll(MemoryLeakMixin, TestCase):
@@ -994,7 +1220,7 @@ class TestConstListUnroll(MemoryLeakMixin, TestCase):
         self.assertEqual(foo(), foo.py_func())
 
     def test_05(self):
-        # fine, list has to be homogeneous in dtype as its an arg
+        # illegal, list has to be const
         @njit
         def foo(tup1, tup2):
             acc = 0
