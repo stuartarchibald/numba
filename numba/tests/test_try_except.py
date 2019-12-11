@@ -29,6 +29,7 @@ class TestTryBareExcept(TestCase):
         except:
             <handling>
     """
+
     def test_try_inner_raise(self):
         @njit
         def inner(x):
@@ -224,7 +225,7 @@ class TestTryBareExcept(TestCase):
             res = foo(10)
 
         self.assertIsNone(res)
-        self.assertEqual(stdout.getvalue().split(), ["CAUGHT",],)
+        self.assertEqual(stdout.getvalue().split(), ["CAUGHT", ],)
 
     def test_yield(self):
         @njit
@@ -260,7 +261,7 @@ class TestTryBareExcept(TestCase):
         with captured_stdout() as stdout:
             foo(10)
 
-        self.assertEqual(stdout.getvalue().split(), ["CAUGHT",],)
+        self.assertEqual(stdout.getvalue().split(), ["CAUGHT", ],)
 
     def test_closure3(self):
         @njit
@@ -277,7 +278,7 @@ class TestTryBareExcept(TestCase):
             res = foo(10)
 
         self.assertEqual(res, [1, 2, 3])
-        self.assertEqual(stdout.getvalue().split(), ["CAUGHT",] * 3,)
+        self.assertEqual(stdout.getvalue().split(), ["CAUGHT", ] * 3,)
 
     def test_closure4(self):
         @njit
@@ -311,7 +312,7 @@ class TestTryBareExcept(TestCase):
         with captured_stdout() as stdout:
             foo()
 
-        self.assertEqual(stdout.getvalue().split(), ["CAUGHT",])
+        self.assertEqual(stdout.getvalue().split(), ["CAUGHT", ])
 
     def test_for_loop(self):
         @njit
@@ -343,7 +344,7 @@ class TestTryBareExcept(TestCase):
 
         self.assertEqual(
             stdout.getvalue().split(),
-            ["CAUGHT",] * 4 + ["CAUGHT%s" % i for i in range(1, 4)],
+            ["CAUGHT", ] * 4 + ["CAUGHT%s" % i for i in range(1, 4)],
         )
 
     def test_try_pass(self):
@@ -357,6 +358,19 @@ class TestTryBareExcept(TestCase):
 
         res = foo(123)
         self.assertEqual(res, 123)
+
+    def test_try_except_reraise(self):
+        @njit
+        def udt():
+            try:
+                raise ValueError("ERROR")
+            except BaseException:
+                raise
+
+        for fn in (udt, udt.py_func):
+            with self.assertRaises(ValueError) as raises:
+                fn()
+            self.assertIn("ERROR", str(raises.exception))
 
 
 @skip_tryexcept_unsupported
@@ -446,6 +460,38 @@ class TestTryExceptCaught(TestCase):
             str(raises.exception)
         )
 
+    # runtime error no active exception to reraise
+    def test_try_except_reraise(self):
+        @njit
+        def udt():
+            try:
+                raise ValueError("ERROR")
+            except Exception:
+                raise
+
+        for fn in (udt, udt.py_func):
+            with self.assertRaises(ValueError) as raises:
+                fn()
+            self.assertIn("ERROR", str(raises.exception))
+
+    # breaks CFG
+    def test_try_except_reraise_chain(self):
+        ve = ValueError
+        @njit
+        def udt():
+            try:
+                raise ValueError("ERROR")
+            except Exception:
+                try:
+                    raise
+                except BaseException:
+                    raise
+
+        for fn in (udt.py_func, udt):
+            with self.assertRaises(ValueError) as raises:
+                fn()
+            self.assertIn("ERROR", str(raises.exception))
+
 
 @skip_tryexcept_unsupported
 class TestTryExceptNested(TestCase):
@@ -476,7 +522,7 @@ class TestTryExceptNested(TestCase):
                         print('D')
                         raise MyError("y")
                     print('E')
-                except Exception: # noqa: F722
+                except Exception:  # noqa: F722
                     print('F')
                     try:
                         print('H')
@@ -626,7 +672,7 @@ class TestTryExceptRefct(MemoryLeakMixin, TestCase):
                 print("A")
                 lst.append(0)
                 print("B")
-                lst.append("fda") # invalid type will cause typing error
+                lst.append("fda")  # invalid type will cause typing error
                 print("C")
                 return lst
             except Exception:
