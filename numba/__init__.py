@@ -44,9 +44,13 @@ import numba.withcontexts
 from numba.withcontexts import objmode_context as objmode
 
 # Enable bytes/unicode array support (Python 3.x only)
+# Enable first-class functions support (Python 3.x only)
 from .utils import IS_PY3
 if IS_PY3:
     import numba.charseq
+
+    import numba.function
+
 
 # Keep this for backward compatibility.
 test = runtests.main

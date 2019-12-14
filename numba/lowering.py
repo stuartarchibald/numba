@@ -15,7 +15,7 @@ from .errors import (LoweringError, new_error_context, TypingError,
 from .targets import removerefctpass
 from .funcdesc import default_mangler
 from . import debuginfo
-
+from .utils import IS_PY3
 
 class Environment(_dynfunc.Environment):
     """Stores globals and constant pyobjects for runtime.
@@ -720,7 +720,7 @@ class Lower(BaseLower):
         elif isinstance(fnty, types.RecursiveCall):
             res = self._lower_call_RecursiveCall(fnty, expr, signature)
 
-        elif isinstance(fnty, types.FunctionType):
+        elif IS_PY3 and isinstance(fnty, types.FunctionType):
             res = self._lower_call_FunctionType(fnty, expr, signature)
 
         else:
