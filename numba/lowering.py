@@ -15,7 +15,7 @@ from .errors import (LoweringError, new_error_context, TypingError,
 from .targets import removerefctpass
 from .funcdesc import default_mangler
 from . import debuginfo
-from .utils import IS_PY3
+
 
 class Environment(_dynfunc.Environment):
     """Stores globals and constant pyobjects for runtime.
@@ -893,9 +893,11 @@ class Lower(BaseLower):
 
         be_fnty = lower_nbtype(fnty)
         fstruct = self.loadvar(expr.func.name)
-        addr = builder.extract_value(fstruct, 0, name='addr_of_%s' % (expr.func.name))
-        fptr = cgutils.alloca_once(builder, be_fnty.as_pointer(), name="fptr_of_%s" % (expr.func.name))
-        r = builder.store(builder.inttoptr(addr, be_fnty.as_pointer()), fptr)
+        addr = builder.extract_value(fstruct, 0,
+                                     name='addr_of_%s' % (expr.func.name))
+        fptr = cgutils.alloca_once(builder, be_fnty.as_pointer(),
+                                   name="fptr_of_%s" % (expr.func.name))
+        builder.store(builder.inttoptr(addr, be_fnty.as_pointer()), fptr)
         ptr = builder.load(fptr)
         res = self.context.call_function_pointer(
             self.builder, ptr, argvals, fnty.cconv,
