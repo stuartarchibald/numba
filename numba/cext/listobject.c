@@ -227,6 +227,15 @@ numba_list_allocated(NB_List *lp) {
     return lp->allocated;
 }
 
+/* Return the base pointer of the list items
+ */
+char *
+numba_list_base_ptr(NB_List *lp)
+{
+    int a;
+    return lp->items;
+}
+
 /* Set an item in a list.
  *
  * lp: a list
