@@ -487,9 +487,10 @@ class IndexDataCacheFile(object):
                 data_name = self._data_name(i)
                 if data_name not in existing:
                     break
-            overloads[key] = data_name
+            self._save_data(data_name, data)
             self._save_index(overloads)
-        self._save_data(data_name, data)
+            # only store the key once the data is written
+            overloads[key] = data_name
 
     def load(self, key):
         """
