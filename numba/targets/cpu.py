@@ -61,8 +61,8 @@ class CPUContext(BaseContext):
         rtsys.initialize(self)
 
         # Initialize additional implementations
-        if utils.PY3:
-            import numba.unicode
+        import numba.unicode
+        import numba.function
 
     def load_additional_registries(self):
         # Add target specific implementations
