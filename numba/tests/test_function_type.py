@@ -1,5 +1,5 @@
 import types as pytypes
-from numba import jit, function, cfunc, types, int64, float64, float32
+from numba import jit, njit, function, cfunc, types, int64, float64, float32
 import ctypes
 
 from .support import TestCase
@@ -658,3 +658,182 @@ class TestMiscIssues(TestCase):
 
         r = composition((b, a, b, b, a), 0.5)
         self.assertEqual(r, ((0.5 + 1.0) ** 4 + 1.0) ** 2)
+
+
+class TestAdditionalIssues(TestCase):
+
+    # fails, numba internal error
+    def test_01(self):
+
+        sig = int64(int64)
+
+        @cfunc(sig)
+        def a(i):
+            return i + 1
+
+        @njit
+        def foo(x):
+            return x(10.2)
+
+        foo(a)
+
+    # should this work?
+    def test_02(self):
+
+        sig = types.unicode_type(int64)
+
+        @cfunc(sig)
+        def a(i):
+            return 'aaa'
+
+        @njit
+        def foo(x):
+            return x(10)
+
+        print(foo(a))
+
+    # probably need to validate the signature a bit more?
+    def test_03(self):
+
+        class Nonsense(object):
+            def __call__(self, *args, **kwargs):
+                pass
+
+        sig = Nonsense()(int64,)
+
+        @cfunc(sig)
+        def a(i):
+            pass
+
+        @njit
+        def foo(x):
+            return x(10)
+
+        print(foo(a))
+
+    # probably need to validate the signature a bit more? this is something
+    # the might be a valid "mistake"
+    def test_04(self):
+
+        sig = types.UnicodeType(int64,)
+
+        @cfunc(sig)
+        def a(i):
+            pass
+
+        @njit
+        def foo(x):
+            return x(10)
+
+        print(foo(a))
+
+    # how do you create a function of a function and use it?
+    def test_05(self):
+
+        innersig = int64(float64,)
+
+        @cfunc(innersig)
+        def f(i):
+            return int64(i * 3)
+
+        sig = int64(types.FunctionType(types.FunctionPrototype(f._sig.return_type,f._sig.args,)))
+        @cfunc(sig)
+        def a(i):
+            return i(10.)
+
+        @njit
+        def foo(z, x):
+            return z(x)
+
+        print(sig)
+
+        print(foo(a, f))
+
+    # Error message:
+    # No conversion from Literal[str](aaa) to int64 for '$4return_value.1', defined at None
+    # Why defined at `None` is there no way to get some location information in there?
+    def test_06(self):
+        sig = types.int64(types.int32,)
+
+        @cfunc(sig)
+        def a(i):
+            return 'aaa'
+
+        @njit
+        def foo(x):
+            return x(10)
+
+        print(foo(a))
+
+    # literals not handled correctly, should they type cast?
+    def test_07(self):
+        sig = types.int64(types.int32,)
+
+        @cfunc(sig)
+        def a(i):
+            return 1
+
+        @njit
+        def foo(x):
+            return x(10)
+
+        print(foo(a))
+
+    # literals not handled correctly, this should work.
+    def test_08(self):
+        sig = types.int64(types.unicode_type,)
+
+        @cfunc(sig)
+        def a(i):
+            return 1
+
+        @njit
+        def foo(x):
+            return x("aaa")
+
+        print(foo(a))
+
+    # Should optionals work OOTB?
+    def test_09(self):
+        sig = types.int64(types.int64,)
+
+        @cfunc(sig)
+        def a(i):
+            return 1
+
+        @njit
+        def foo(x, pred, val=None):
+            if pred:
+                val = 10
+            return x(val)
+
+        pred = True
+        print(foo(a, pred))
+
+    # Should this work?
+    def test_10(self):
+        sig = types.int64(types.none,)
+
+        @cfunc(sig)
+        def a(i):
+            return 1
+
+        @njit
+        def foo(x):
+            return x(None)
+
+        print(foo(a))
+
+    # Should this work?
+    def test_11(self):
+        sig = types.int64(types.int64, types.Omitted(types.int64))
+
+        @cfunc(sig)
+        def a(i, v=12):
+            return i + v
+
+        @njit
+        def foo(x, arg):
+            return x(arg)
+
+        foo(a, 10)
