@@ -21,15 +21,15 @@ from numba.extending import (
 )
 from numba.targets.imputils import iternext_impl
 from numba import types
-from numba.types import (
+from numba.core.types import (
     ListType,
     ListTypeIterableType,
     ListTypeIteratorType,
     Type,
 )
 from numba.targets.imputils import impl_ret_borrowed, RefType
-from numba.errors import TypingError
-from numba import typing
+from numba.core.errors import TypingError
+from numba.core import typing
 from numba.typedobjectutils import (_as_bytes,
                                     _cast,
                                     _nonoptional,
