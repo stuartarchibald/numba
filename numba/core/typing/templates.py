@@ -628,7 +628,7 @@ class _IntrinsicTemplate(AbstractTemplate):
         """
         Type the intrinsic by the arguments.
         """
-        from numba.targets.imputils import lower_builtin
+        from numba.core.imputils import lower_builtin
 
         cache_key = self.context, args, tuple(kws.items())
         try:
@@ -723,7 +723,7 @@ class _OverloadAttributeTemplate(AttributeTemplate):
         """
         Register attribute implementation.
         """
-        from numba.targets.imputils import lower_getattr
+        from numba.core.imputils import lower_getattr
         attr = cls._attr
 
         @lower_getattr(cls.key, attr)
@@ -766,7 +766,7 @@ class _OverloadMethodTemplate(_OverloadAttributeTemplate):
         """
         Register generic method implementation.
         """
-        from numba.targets.imputils import lower_builtin
+        from numba.core.imputils import lower_builtin
         attr = cls._attr
 
         @lower_builtin((cls.key, attr), cls.key, types.VarArg(types.Any))
