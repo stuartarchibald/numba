@@ -5,8 +5,8 @@ import numpy as np
 
 from numba import unittest_support as unittest
 from numba.compiler import compile_isolated
-from numba import typeinfer, jit
-from numba.core import types, typing, errors
+from numba import jit
+from numba.core import types, typing, errors, typeinfer
 from numba.core.typeconv import Conversion
 
 from numba.tests.support import TestCase, tag
