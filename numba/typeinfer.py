@@ -23,7 +23,8 @@ from functools import reduce
 
 from numba import ir, types, utils, config, typing
 from .errors import (TypingError, UntypedAttributeError, new_error_context,
-                     termcolor, UnsupportedError, ForceLiteralArg)
+                     termcolor, UnsupportedError, ForceLiteralArg,
+                     LoweringError)
 from .funcdesc import qualifying_prefix
 
 
@@ -154,6 +155,12 @@ class ConstraintNetwork(object):
                         highlighting=False,
                     )
                     errors.append(utils.chain_exception(new_exc, e))
+                except LoweringError as e:
+                    # parfors and other extensions might be trying to lower
+                    # things whilst still in the typing stack due to stack
+                    # re-entry, make sure LoweringErrors propagate up to the
+                    # user.
+                    raise e
                 except Exception as e:
                     _logger.debug("captured error", exc_info=e)
                     msg = ("Internal error at {con}.\n"

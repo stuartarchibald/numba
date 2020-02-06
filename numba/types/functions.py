@@ -129,7 +129,7 @@ class BaseFunction(Callable):
                         nolitargs = tuple([unliteral(a) for a in args])
                         nolitkws = {k: unliteral(v) for k, v in kws.items()}
                         sig = temp.apply(nolitargs, nolitkws)
-                except Exception as e:
+                except errors.TypingError as e:
                     sig = None
                     failures.add_error(temp_cls, e)
                 else:
@@ -145,6 +145,7 @@ class BaseFunction(Callable):
             raise AssertionError("Internal Error. "
                                  "Function resolution ended with no failures "
                                  "or successful signature")
+
         failures.raise_error()
 
     def get_call_signatures(self):
@@ -206,8 +207,13 @@ class BoundFunction(Callable, Opaque):
         # Try with Literal
         try:
             out = template.apply(args, kws)
-        except Exception:
+        except errors.LoweringError as exc:
+            # If something has a LoweringError, e.g. parfors, then it needs to
+            # be raised, don't retry it without literals.
+            e = exc
             out = None
+        if e is not None:
+            raise e
         # If that doesn't work, remove literals
         if out is None:
             args = [unliteral(a) for a in args]
