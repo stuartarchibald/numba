@@ -66,9 +66,18 @@ class TypeVar(object):
             if self.type is not None:
                 unified = self.context.unify_pairs(self.type, tp)
                 if unified is None:
+                    lhs = self.type
+                    rhs = tp
+                    # specialise the error message for arrays such that the
+                    # if the array type is based on a literal the actual,
+                    # unliteral, dtype appears.
+                    if (isinstance(self.type, types.Array) and
+                        isinstance(tp, types.Array)):
+                           lhs = types.Array(lhs.dtype, lhs.ndim, lhs.layout)
+                           rhs = types.Array(rhs.dtype, rhs.ndim, rhs.layout)
                     msg = "Cannot unify %s and %s for '%s', defined at %s"
-                    raise TypingError(msg % (self.type, tp, self.var,
-                                             self.define_loc),
+                    raise TypingError(msg % (lhs, rhs, self.var,
+                                      self.define_loc),
                                       loc=self.define_loc)
             else:
                 # First time definition
