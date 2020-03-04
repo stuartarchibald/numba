@@ -322,6 +322,7 @@ exclude =
     numba/tests/npyufunc/test_parallel_ufunc_issues.py
     numba/tests/npyufunc/test_parallel_env_variable.py
     numba/tests/npyufunc/test_gufunc.py
+    numba/tests/test_refactor_moves.py
     numba/core/typing/cmathdecl.py
     numba/core/typing/bufproto.py
     numba/core/typing/mathdecl.py
