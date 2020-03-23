@@ -14,6 +14,7 @@ from collections import defaultdict
 from numba.core.utils import add_metaclass, reraise, chain_exception
 from functools import wraps
 from abc import abstractmethod
+from importlib import import_module
 
 # Filled at the end
 __all__ = []
@@ -390,6 +391,34 @@ def deprecated(arg):
         return decorator(arg)
     else:
         return decorator
+
+
+def deprecate_moved_module(old_module, new_module, stacklevel=3):
+    """Warn about a module level location move of some part of Numba's
+    internals. stacklevel is 3 by default as most warning locations are
+    from `numba.XYZ` shims.
+    """
+
+    msg = ("An import of was requested from a module that has moved "
+           "location.\nImport requested from: '{}', please update to use "
+           "'{}' or pin to Numba version 0.48.0.")
+    warnings.warn(msg.format(old_module, new_module),
+                  category=NumbaDeprecationWarning, stacklevel=stacklevel)
+
+
+def deprecate_moved_module_getattr(old_module, new_module):
+    """For replacing module level __getattr__ to warn users above modules moving
+    locations
+    """
+    def wrapper(attr):
+        import_module(new_module)
+        msg = ("An import of was requested from a module that has moved "
+               "location.\nImport requested from: '{}', please update to use "
+               "'{}' or pin to Numba version 0.48.0.")
+        warnings.warn(msg.format(old_module, new_module),
+                        category=NumbaDeprecationWarning, stacklevel=2)
+        return getattr(new_module, attr)
+    return wrapper
 
 
 class WarningsFixer(object):
