@@ -861,6 +861,20 @@ class TestAPIMoves_Q1_2020(TestCase):
             with checker(fn):
                 getattr(numba.analysis, fn)
 
+    def test_numba_decorators(self):
+        checker = self.check_warning(
+            "numba.decorators", "numba.core.decorators"
+        )
+        with checker():
+            import numba.decorators
+        for fn in (
+            "njit",
+            "jit",
+            "generated_jit",
+        ):
+            with checker(fn):
+                getattr(numba.decorators, fn)
+
 
 if __name__ == "__main__":
     unittest.main()
