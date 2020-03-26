@@ -395,12 +395,15 @@ def deprecated(arg):
 
 _moved_msg1 = ("An import was requested from a module that has moved location."
                "\nImport requested from: '{}', please update to use "
-               "'{}' or pin to Numba version 0.48.0.")
+               "'{}' or pin to Numba version 0.48.0. This alias will not be "
+               "present in Numba version 0.50.0.")
 
 
 _moved_msg2 = ("An import was requested from a module that has moved location"
                ".\nImport of '{}' requested from: '{}', please update to use "
-               "'{}' or pin to Numba version 0.48.0.")
+               "'{}' or pin to Numba version 0.48.0. This alias will not be "
+               "present in Numba version 0.50.0.")
+
 
 _moved_no_replacement = ("No direct replacement available. Visit "
                          "https://gitter.im/numba/numba-dev to request help. "
