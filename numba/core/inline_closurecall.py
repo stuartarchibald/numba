@@ -122,6 +122,9 @@ class InlineClosureCallPass(object):
                 _fix_nested_array(self.func_ir)
 
         if modified:
+            cfg = compute_cfg_from_blocks(self.func_ir.blocks)
+            for dead in cfg.dead_nodes():
+                del self.func_ir.blocks[dead]
             # run dead code elimination
             dead_code_elimination(self.func_ir)
             # do label renaming

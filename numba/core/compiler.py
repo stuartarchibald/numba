@@ -207,6 +207,14 @@ def run_frontend(func, inline_closures=False, emit_dels=False):
         inline_pass = InlineClosureCallPass(func_ir, cpu.ParallelOptions(False),
                                             {}, False)
         inline_pass.run()
+    from numba.core.untyped_passes import GenericRewrites
+    sd = StateDict()
+    sd['func_ir'] = func_ir
+    sd['func_id'] = func_id
+    sd['status'] = _CompileStatus(False, True)
+    sd['typemap'] = {}
+    sd['calltypes'] = {}
+    GenericRewrites().run_pass(sd)
     post_proc = postproc.PostProcessor(func_ir)
     post_proc.run(emit_dels)
     return func_ir
@@ -445,6 +453,15 @@ class DefaultPassBuilder(object):
             pm.add_pass(TranslateByteCode, "analyzing bytecode")
             pm.add_pass(FixupArgs, "fix up args")
         pm.add_pass(IRProcessing, "processing IR")
+        pm.add_pass(InlineClosureLikes,
+                    "inline calls to locally defined closures")
+        # inline functions that have been determined as inlinable and rerun
+        # branch pruning, this needs to be run after closures are inlined as
+        # the IR repr of a closure masks call sites if an inlinable is called
+        # inside a closure
+        pm.add_pass(InlineInlinables, "inline inlinable functions")
+        if not state.flags.no_rewrites:
+            pm.add_pass(DeadBranchPrune, "dead branch pruning")
         pm.add_pass(WithLifting, "Handle with contexts")
 
         # pre typing
@@ -453,18 +470,9 @@ class DefaultPassBuilder(object):
             pm.add_pass(DeadBranchPrune, "dead branch pruning")
             pm.add_pass(GenericRewrites, "nopython rewrites")
 
-        pm.add_pass(InlineClosureLikes,
-                    "inline calls to locally defined closures")
         # convert any remaining closures into functions
         pm.add_pass(MakeFunctionToJitFunction,
                     "convert make_function into JIT functions")
-        # inline functions that have been determined as inlinable and rerun
-        # branch pruning, this needs to be run after closures are inlined as
-        # the IR repr of a closure masks call sites if an inlinable is called
-        # inside a closure
-        pm.add_pass(InlineInlinables, "inline inlinable functions")
-        if not state.flags.no_rewrites:
-            pm.add_pass(DeadBranchPrune, "dead branch pruning")
 
         pm.add_pass(FindLiterallyCalls, "find literally calls")
         pm.add_pass(LiteralUnroll, "handles literal_unroll")
