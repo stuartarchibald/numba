@@ -908,7 +908,23 @@ class Interpreter(object):
         for kval, tmp in zip(keyconsts, keytmps):
             self.store(kval, tmp)
         items = list(zip(map(self.get, keytmps), map(self.get, values)))
-        expr = ir.Expr.build_map(items=items, size=2, loc=self.loc)
+
+        # sort out literal values
+        literal_items = []
+        for v in values:
+            defns = self.definitions[v]
+            if len(defns) != 1:
+                break
+            defn = defns[0]
+            if not isinstance(defn, ir.Const):
+                break
+            literal_items.append(defn.value)
+        if len(literal_items) != len(values):
+            literal_dict = None
+        else:
+            literal_dict = {x:y for x, y in zip(keytup, literal_items)}
+        expr = ir.Expr.build_map(items=items, size=2,
+                                 literal_value=literal_dict, loc=self.loc)
         self.store(expr, res)
 
     def op_GET_ITER(self, inst, value, res):

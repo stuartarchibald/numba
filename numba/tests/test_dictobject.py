@@ -21,6 +21,7 @@ from numba.core import types
 from numba.tests.support import (TestCase, MemoryLeakMixin, unittest,
                                  override_config, forbid_codegen)
 from numba.experimental import jitclass
+from numba.extending import overload, overload_method
 
 
 class TestDictObject(MemoryLeakMixin, TestCase):
@@ -1629,3 +1630,164 @@ class TestDictIterator(TestCase):
         self.assertEqual([10,20,30], res1[1])
         self.assertEqual([4,5,6], res2[0])
         self.assertEqual([77,88,99], res2[1])
+
+
+class TestLiteralStrKeyDict(TestCase):
+
+    def test_basic_const_lowering_boxing(self):
+        @njit
+        def foo():
+            ld = {'a': 1, 'b': 2j, 'c': 'd'}
+            return (ld['a'], ld['b'], ld['c'])
+
+        self.assertEqual(foo(), (1, 2j, 'd'))
+
+    def test_basic_nonconst_in_scope(self):
+        @njit
+        def foo():
+            ld = {'a': 1, 'b': 2j, 'c': 'd', 'd': np.ones(5,)}
+
+        with self.assertRaises(TypingError) as raises:
+            foo()
+
+        self.assertIn("Overload in function 'setitem'", str(raises.exception))
+
+    def test_basic_nonconst_freevar(self):
+        e = 5
+
+        @njit
+        def foo():
+            ld = {'a': 1, 'b': 2j, 'c': 'd', 'd': e}
+
+        with self.assertRaises(TypingError) as raises:
+            foo()
+
+        self.assertIn("Overload in function 'setitem'", str(raises.exception))
+
+    def test_literal_value(self):
+
+        def bar(x):
+            pass
+
+        @overload(bar)
+        def ol_bar(x):
+            self.assertEqual(x.literal_value, {'a': 1, 'b': 2j, 'c': 'd'})
+            def impl(x):
+                pass
+            return impl
+
+        @njit
+        def foo():
+            ld = {'a': 1, 'b': 2j, 'c': 'd'}
+            bar(ld)
+
+        foo()
+
+    def test_read_only(self):
+
+        def _len():
+            ld = {'a': 1, 'b': 2j, 'c': 'd'}
+            return len(ld)
+
+        def static_getitem():
+            ld = {'a': 1, 'b': 2j, 'c': 'd'}
+            return ld['b']
+
+        def contains():
+            ld = {'a': 1, 'b': 2j, 'c': 'd'}
+            return 'b' in ld, 'f' in ld
+
+        def copy():
+            ld = {'a': 1, 'b': 2j, 'c': 'd'}
+            new = ld.copy()
+            return ld == new
+
+        rdonlys = (_len, static_getitem, contains, copy)
+
+        for test in rdonlys:
+            with self.subTest(test.__name__):
+                self.assertPreciseEqual(njit(test)(), test())
+
+    def test_mutation_failure(self):
+
+        def setitem():
+            ld = {'a': 1, 'b': 2j, 'c': 'd'}
+            ld['a'] = 12
+
+        def delitem():
+            ld = {'a': 1, 'b': 2j, 'c': 'd'}
+            del ld['a']
+
+        def popitem():
+            ld = {'a': 1, 'b': 2j, 'c': 'd'}
+            ld.popitem()
+
+        def pop():
+            ld = {'a': 1, 'b': 2j, 'c': 'd'}
+            ld.pop()
+
+        def clear():
+            ld = {'a': 1, 'b': 2j, 'c': 'd'}
+            ld.clear()
+
+        def setdefault():
+            ld = {'a': 1, 'b': 2j, 'c': 'd'}
+            ld.setdefault('f', 1)
+
+        illegals = (setitem, delitem, popitem, pop, clear, setdefault)
+
+        for test in illegals:
+            with self.subTest(test.__name__):
+                with self.assertRaises(TypingError) as raises:
+                    njit(test)()
+                expect = "Cannot mutate a literal dictionary"
+                self.assertIn(expect, str(raises.exception))
+
+    def test_get(self):
+
+        @njit
+        def get(x):
+            ld = {'a': 2j, 'c': 'd'}
+            return ld.get(x)
+
+        @njit
+        def getitem(x):
+            ld = {'a': 2j, 'c': 'd'}
+            return ld[x]
+
+        for test in (get, getitem):
+            with self.subTest(test.__name__):
+                with self.assertRaises(TypingError) as raises:
+                    test('a')
+                expect = "Cannot get{item}() on a literal dictionary"
+                self.assertIn(expect, str(raises.exception))
+
+    def test_dict_keys(self):
+
+        @njit
+        def foo():
+            ld = {'a': 2j, 'c': 'd'}
+            return ld.keys()
+
+        self.assertEqual(foo(), ('a', 'c'))
+
+    def test_dict_values(self):
+
+        @njit
+        def foo():
+            ld = {'a': 2j, 'c': 'd'}
+            return ld.values()
+
+        self.assertEqual(foo(), (2j, 'd'))
+
+    def test_dict_items(self):
+
+        @njit
+        def foo():
+            ld = {'a': 2j, 'c': 'd'}
+            return ld.items()
+
+        self.assertEqual(foo(), (('a', 2j), ('c', 'd')))
+
+if __name__ == '__main__':
+    unittest.main()
