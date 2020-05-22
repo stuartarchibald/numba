@@ -27,7 +27,8 @@ from numba.core.errors import (TypingError, UntypedAttributeError,
                                new_error_context, termcolor, UnsupportedError,
                                ForceLiteralArg, CompilerError)
 from numba.core.funcdesc import qualifying_prefix
-
+from numba.core.interpreter import _UNKNOWN_VALUE
+from numba import typeof
 
 _logger = logging.getLogger(__name__)
 
@@ -276,11 +277,13 @@ class BuildSetConstraint(_BuildContainerConstraint):
 
 
 class BuildMapConstraint(object):
+    # Constraint for typed dictionaries
 
-    def __init__(self, target, items, loc):
+    def __init__(self, target, items, loc, initial_value=None):
         self.target = target
         self.items = items
         self.loc = loc
+        self.initial_value = initial_value
 
     def __call__(self, typeinfer):
         with new_error_context("typing of dict at {0}", self.loc):
@@ -295,9 +298,64 @@ class BuildMapConstraint(object):
             else:
                 key_type, value_type = tsets[0]
                 typeinfer.add_type(self.target,
-                                   types.DictType(key_type, value_type),
+                                   types.DictType(key_type, value_type,
+                                                  self.initial_value),
                                    loc=self.loc)
 
+
+class BuildLiteralStrKeysMapConstraint(object):
+    # Constraint for literal dictionaries where keys are literal strings and
+    # values can be anything const-like (heterogeneous values is fine).
+
+    def __init__(self, target, items, literal_value, value_indexes, loc):
+        self.target = target
+        self.items = items
+        self.literal_value = literal_value
+        self.value_indexes = value_indexes
+        self.loc = loc
+
+    def __call__(self, typeinfer):
+        with new_error_context("typing of literal dict at {0}", self.loc):
+            typevars = typeinfer.typevars
+            resolved_dict = {}
+            for k, v in self.literal_value.items():
+                if isinstance(v, _UNKNOWN_VALUE):
+                    value = typevars[v.varname].getone()
+                else:
+                    value = types.maybe_literal(v)
+                    if value is None:
+                        value = typeof(v)
+                resolved_dict[types.literal(k)] = value
+            typeinfer.add_type(self.target,
+                                types.LiteralStrKeyDict(resolved_dict,
+                                                        self.value_indexes),
+                                loc=self.loc)
+
+
+class BuildLiteralHomogeneousMapConstraint(object):
+    # Constraint for literal dictionaries where keys are homogeneous in type and
+    # values are homogeneous in type.
+
+    def __init__(self, target, items, literal_value, loc):
+        self.target = target
+        self.items = items
+        self.literal_value = literal_value
+        self.loc = loc
+
+    def __call__(self, typeinfer):
+        with new_error_context("typing of literal dict at {0}", self.loc):
+            typevars = typeinfer.typevars
+            tsets = [(typevars[k.name].getone(), typevars[v.name].getone())
+                     for k, v in self.items]
+            key_type, value_type = tsets[0]
+            resolved_dict = {}
+            for k, v in self.literal_value.items():
+                resolved_dict[types.literal(k)] = types.literal(v)
+            typeinfer.add_type(self.target,
+                                types.LiteralDict(key_type,
+                                                  value_type,
+                                                  resolved_dict,),
+                                loc=self.loc)
 
 class ExhaustIterConstraint(object):
     def __init__(self, target, count, iterator, loc):
@@ -666,12 +724,18 @@ class SetItemRefinement(object):
         if _is_array_not_precise(targetty):
             typeinfer.add_type(self.target.name, sig.args[0], loc=self.loc)
         # For Dict setitem
-        if isinstance(targetty, types.DictType) and not targetty.is_precise():
-            refined = targetty.refine(idxty, valty)
-            typeinfer.add_type(
-                self.target.name, refined,
-                loc=self.loc,
-            )
+        if isinstance(targetty, types.DictType):
+            if not targetty.is_precise():
+                refined = targetty.refine(idxty, valty)
+                typeinfer.add_type(
+                    self.target.name, refined,
+                    loc=self.loc,
+                )
+            elif isinstance(targetty, types.LiteralStrKeyDict):
+                typeinfer.add_type(
+                    self.target.name, types.DictType(idxty, valty),
+                    loc=self.loc,
+                )
 
 
 class SetItemConstraint(SetItemRefinement):
@@ -1592,8 +1656,72 @@ http://numba.pydata.org/numba-doc/latest/user/troubleshoot.html#my-code-has-an-u
                                             loc=inst.loc)
             self.constraints.append(constraint)
         elif expr.op == 'build_map':
-            constraint = BuildMapConstraint(target.name, items=expr.items,
-                                            loc=inst.loc)
+            if expr.literal_value is not None:
+                # Filter out what sort of dict this could be, if the keys are
+                # heterogeneous then bail
+                dkeys = [*expr.literal_value.keys()]
+                dvals = [*expr.literal_value.values()]
+
+                # If the keys are strings and the values are heterogeneous
+                # then a LiteralStrKeyMap can be used
+
+                # If the keys are homogeneous in type and the values are
+                # homogeneous in type then it's a typed dict
+
+                str_keys = all(isinstance(x, str) for x in dkeys) if dkeys else False
+                # typed dict looks at the first element in the curly braces
+                # ctor and then bakes that in as the type, emulate that here
+                def get_types(items, index, unliteral=True):
+                    tys = []
+                    for item in items:
+                        typ = self.typevars[item[index].name].type
+                        if typ is None:
+                            tys.append(item)
+                            continue
+                        if unliteral:
+                            typ = types.unliteral(typ)
+                        tys.append(typ)
+                    return tys
+
+                vtys = get_types(expr.items, 1)
+                vliteraltys = get_types(expr.items, 1, False)
+
+                # reuse the typed dict ctor cast checking, essentially peel the
+                # type of the first value and make sure everything else matches
+                # it in terms of type
+                from numba.typed.typedobjectutils import _sentry_safe_cast
+                ix0_ty = vtys[0]
+                def check_cast(toty):
+                    try:
+                        _sentry_safe_cast(toty, ix0_ty)
+                    except TypingError:
+                        return False
+                    else:
+                        return True
+
+                homogeneous_values = all(check_cast(x) for x in vtys) if vtys else False
+                literal_values = all(isinstance(x, types.Literal) for x in vliteraltys) if vliteraltys else False
+
+                if str_keys and not homogeneous_values:
+                    constraint = BuildLiteralStrKeysMapConstraint(
+                        target.name,
+                        items=expr.items,
+                        literal_value=expr.literal_value,
+                        value_indexes=expr.value_indexes,
+                        loc=inst.loc)
+                else:
+                    if literal_values:
+                        construction_value = expr.literal_value
+                    else:
+                        construction_value = None
+                    # might be able to coerce it as a standard dict via cast:
+                    constraint = BuildMapConstraint(target.name,
+                                                    items=expr.items,
+                                                    loc=inst.loc,
+                                                    initial_value=construction_value)
+            else: # no literal value, just build the typed dict constraint
+                constraint = BuildMapConstraint(target.name, items=expr.items,
+                                                loc=inst.loc)
             self.constraints.append(constraint)
         elif expr.op == 'cast':
             self.constraints.append(Propagate(dst=target.name,

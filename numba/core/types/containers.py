@@ -1,6 +1,6 @@
 from collections.abc import Iterable
 from .abstract import (ConstSized, Container, Hashable, MutableSequence,
-                       Sequence, Type, TypeRef)
+                       Sequence, Type, TypeRef, Literal, InitialValue)
 from .common import Buffer, IterableType, SimpleIterableType, SimpleIteratorType
 from .misc import Undefined, unliteral, Optional, NoneType
 from ..typeconv import Conversion
@@ -590,10 +590,10 @@ def _sentry_forbidden_types(key, value):
         raise TypingError('{} as value is forbidden'.format(value))
 
 
-class DictType(IterableType):
+class DictType(IterableType, InitialValue):
     """Dictionary type
     """
-    def __init__(self, keyty, valty):
+    def __init__(self, keyty, valty, initial_value=None):
         assert not isinstance(keyty, TypeRef)
         assert not isinstance(valty, TypeRef)
         keyty = unliteral(keyty)
@@ -608,6 +608,7 @@ class DictType(IterableType):
         self.key_type = keyty
         self.value_type = valty
         self.keyvalue_type = Tuple([keyty, valty])
+        self._initial_value = initial_value
         name = '{}[{},{}]'.format(
             self.__class__.__name__,
             keyty,
@@ -640,6 +641,38 @@ class DictType(IterableType):
         # If other is dict
         if isinstance(other, DictType):
             if not other.is_precise():
+                return self
+
+
+class LiteralStrKeyDict(Literal, NamedTuple):
+    def __init__(self, literal_value, value_index=None):
+        self._literal_init(literal_value)
+        self.value_index = value_index
+        from collections import namedtuple
+        strkeys = [x.literal_value for x in literal_value.keys()]
+        self.tuple_ty = namedtuple('_ntclazz', ' '.join(strkeys))
+        self.tuple_inst = self.tuple_ty(*literal_value.values())
+        from numba import typeof
+        tys = [unliteral(x) for x in literal_value.values()]
+        NamedTuple.__init__(self, tys, self.tuple_ty)
+        self.name = 'LiteralStrKey[Dict]({})'.format(literal_value)
+        literal_vals = [getattr(x, 'literal_value', None) for x in literal_value.values()]
+
+    def __unliteral__(self):
+        pass
+
+    def unify(self, typingctx, other):
+        """
+        Unify this with the *other* one.
+        """
+        if isinstance(other, LiteralStrKeyDict):
+            for (k1, v1), (k2, v2) in zip(self.literal_value.items(),
+                                          other.literal_value.items()):
+                if k1 != k2: # keys must be same
+                    break
+                if unliteral(v1) != unliteral(v2): # values must be same type
+                    break
+            else:
                 return self
 
 
