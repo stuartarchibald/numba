@@ -245,3 +245,24 @@ def typeof_typeref(val, c):
         return types.NumberClass(val)
     else:
         return types.TypeRef(val)
+
+@typeof_impl.register(dict)
+def _typeof_dict(val, c):
+    if len(val) == 0:
+        raise ValueError("Cannot type empty d")
+    # scan keys/values make sure they are all the same type
+    # perhaps this ought to scan and then type unify
+    keys = [*val.keys()]
+    values = [*val.values()]
+
+    def check(thing, strthing):
+        ty = typeof_impl(thing[0], c)
+        if ty is None:
+            raise ValueError("Cannot type dict %s of %s" % (strthing, ty))
+        for x in thing[1:]:
+            if typeof_impl(x, c) != ty:
+                raise ValueError("Cannot type mixed %s type dictionary" % strthing)
+        return ty
+    keyty = check(keys, "key")
+    valuety = check(values, "value")
+    return types.DictType(keyty, valuety)

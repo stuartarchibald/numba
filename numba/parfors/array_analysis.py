@@ -2806,6 +2806,13 @@ class ArrayAnalysis(object):
         """
         asserts = []
         new_shape = []
+        tmp = []
+        for s in shapes:
+            if s is None:
+                tmp.append(tuple())
+            else:
+                tmp.append(s)
+        shapes = tmp
         max_dim = max([len(shape) for shape in shapes])
         const_size_one = None
         for i in range(max_dim):

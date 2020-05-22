@@ -292,6 +292,27 @@ class BuildMapConstraint(object):
                                    types.DictType(key_type, value_type),
                                    loc=self.loc)
 
+class BuildLiteralMapConstraint(object):
+
+    def __init__(self, target, items, literal_value, loc):
+        self.target = target
+        self.items = items
+        self.literal_value = literal_value
+        self.loc = loc
+
+    def __call__(self, typeinfer):
+        with new_error_context("typing of literal dict at {0}", self.loc):
+            typevars = typeinfer.typevars
+            tsets = [(typevars[k.name].getone(), typevars[v.name].getone())
+                     for k, v in self.items]
+            key_type, value_type = tsets[0]
+            typeinfer.add_type(self.target,
+                                types.LiteralDict(key_type,
+                                                    value_type,
+                                                    self.literal_value,),
+                                loc=self.loc)
+
+
 
 class ExhaustIterConstraint(object):
     def __init__(self, target, count, iterator, loc):
@@ -660,12 +681,18 @@ class SetItemRefinement(object):
         if _is_array_not_precise(targetty):
             typeinfer.add_type(self.target.name, sig.args[0], loc=self.loc)
         # For Dict setitem
-        if isinstance(targetty, types.DictType) and not targetty.is_precise():
-            refined = targetty.refine(idxty, valty)
-            typeinfer.add_type(
-                self.target.name, refined,
-                loc=self.loc,
-            )
+        if isinstance(targetty, types.DictType):
+            if not targetty.is_precise():
+                refined = targetty.refine(idxty, valty)
+                typeinfer.add_type(
+                    self.target.name, refined,
+                    loc=self.loc,
+                )
+            if isinstance(targetty, types.Literal):
+                typeinfer.add_type(
+                    self.target.name, types.DictType(idxty, valty),
+                    loc=self.loc,
+                )
 
 
 class SetItemConstraint(SetItemRefinement):
@@ -1573,8 +1600,14 @@ http://numba.pydata.org/numba-doc/latest/user/troubleshoot.html#my-code-has-an-u
                                             loc=inst.loc)
             self.constraints.append(constraint)
         elif expr.op == 'build_map':
-            constraint = BuildMapConstraint(target.name, items=expr.items,
-                                            loc=inst.loc)
+            if expr.literal_value is not None:
+                constraint = BuildLiteralMapConstraint(target.name,
+                                                       items=expr.items,
+                                                       literal_value = expr.literal_value,
+                                                       loc=inst.loc)
+            else:
+                constraint = BuildMapConstraint(target.name, items=expr.items,
+                                                loc=inst.loc)
             self.constraints.append(constraint)
         elif expr.op == 'cast':
             self.constraints.append(Propagate(dst=target.name,

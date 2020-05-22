@@ -133,7 +133,6 @@ class CPUContext(BaseContext):
 
     def build_map(self, builder, dict_type, item_types, items):
         from numba.typed import dictobject
-
         return dictobject.build_map(self, builder, dict_type, item_types, items)
 
 
