@@ -16,8 +16,9 @@ from numba.core.extending import (
     register_model,
     models,
     lower_builtin,
+    lower_cast,
 )
-from numba.core.imputils import iternext_impl
+from numba.core.imputils import iternext_impl, impl_ret_untracked
 from numba.core import types, cgutils
 from numba.core.types import (
     DictType,
@@ -25,6 +26,7 @@ from numba.core.types import (
     DictKeysIterableType,
     DictValuesIterableType,
     DictIteratorType,
+    LiteralDict,
     Type,
 )
 from numba.core.imputils import impl_ret_borrowed, RefType
@@ -81,6 +83,7 @@ def new_dict(key, value):
 
 
 @register_model(DictType)
+@register_model(LiteralDict)
 class DictModel(models.StructModel):
     def __init__(self, dmm, fe_type):
         members = [
@@ -670,6 +673,8 @@ def impl_len(d):
 def impl_setitem(d, key, value):
     if not isinstance(d, types.DictType):
         return
+    if isinstance(d, types.LiteralDict): # cannot mutate a literal dict
+        return
 
     keyty, valty = d.key_type, d.value_type
 
@@ -743,6 +748,8 @@ def impl_getitem(d, key):
 def impl_popitem(d):
     if not isinstance(d, types.DictType):
         return
+    if isinstance(d, types.LiteralDict): # cannot mutate a literal dict
+        return
 
     def impl(d):
         status, keyval = _dict_popitem(d)
@@ -759,6 +766,8 @@ def impl_popitem(d):
 @overload_method(types.DictType, 'pop')
 def impl_pop(dct, key, default=None):
     if not isinstance(dct, types.DictType):
+        return
+    if isinstance(dct, types.LiteralDict): # cannot mutate a literal dict
         return
 
     keyty = dct.key_type
@@ -790,6 +799,8 @@ def impl_pop(dct, key, default=None):
 def impl_delitem(d, k):
     if not isinstance(d, types.DictType):
         return
+    if isinstance(d, types.LiteralDict): # cannot mutate a literal dict
+        return
 
     def impl(d, k):
         d.pop(k)
@@ -813,6 +824,8 @@ def impl_contains(d, k):
 @overload_method(types.DictType, 'clear')
 def impl_clear(d):
     if not isinstance(d, types.DictType):
+        return
+    if isinstance(d, types.LiteralDict): # cannot mutate a literal dict
         return
 
     def impl(d):
@@ -841,6 +854,8 @@ def impl_copy(d):
 @overload_method(types.DictType, 'setdefault')
 def impl_setdefault(dct, key, default=None):
     if not isinstance(dct, types.DictType):
+        return
+    if isinstance(dct, types.LiteralDict): # cannot mutate a literal dict
         return
 
     def impl(dct, key, default=None):
@@ -1055,24 +1070,178 @@ def impl_iterator_iternext(context, builder, sig, args, result):
 
 
 def build_map(context, builder, dict_type, item_types, items):
-    from numba.typed import Dict
 
-    sig = typing.signature(dict_type)
-    kt, vt = dict_type.key_type, dict_type.value_type
+    if isinstance(dict_type, types.LiteralStrKeyDict):
+        from numba import typeof
+        ty = typeof(dict_type.tuple_inst)
+        sig = typing.signature(ty)
 
-    def make_dict():
-        return Dict.empty(kt, vt)
+        # NOTE TO SELF, this bit can be used for const stuff->const stuff dict
+        const = dict_type.tuple_inst
+        #def make_named_tuple():
+            #return const
+        unliteral_tys = [types.unliteral(x) for x in dict_type.literal_value.values()]
+        nbty = types.NamedTuple(unliteral_tys,
+                                dict_type.tuple_ty)
+        values = [x[1] for x in items]
+        # replace with make_tuple call?
+        tup = context.get_constant_undef(nbty)
+        literal_tys = [x for x in dict_type.literal_value.values()]
+        for i, val in enumerate(values):
+            casted = context.cast(builder, val, literal_tys[i], unliteral_tys[i])
+            tup = builder.insert_value(tup, casted, i)
+        d = tup
+        context.nrt.incref(builder, nbty, d)
 
-    d = context.compile_internal(builder, make_dict, sig, ())
+    else:
+        from numba.typed import Dict
 
-    if items:
-        for (kt, vt), (k, v) in zip(item_types, items):
-            sig = typing.signature(types.void, dict_type, kt, vt)
-            args = d, k, v
+        dt = types.DictType(dict_type.key_type, dict_type.value_type)
+        kt, vt = dict_type.key_type, dict_type.value_type
+        sig = typing.signature(dt)
 
-            def put(d, k, v):
-                d[k] = v
+        def make_dict():
+            return Dict.empty(kt, vt)
 
-            context.compile_internal(builder, put, sig, args)
+        d = context.compile_internal(builder, make_dict, sig, ())
+
+        if items:
+            for (kt, vt), (k, v) in zip(item_types, items):
+                sig = typing.signature(types.void, dt, kt, vt)
+                args = d, k, v
+
+                def put(d, k, v):
+                    d[k] = v
+
+                context.compile_internal(builder, put, sig, args)
 
     return d
+
+
+# ------------------------------------------------------------------------------
+# Literal dictionaries
+# ------------------------------------------------------------------------------
+
+@intrinsic
+def _mixed_values_to_tuple(tyctx, d):
+    keys = [x for x in d.literal_value.keys()]
+    fnty = tyctx.resolve_value_type('static_getitem')
+    literal_tys = [x for x in d.literal_value.values()]
+    def impl(cgctx, builder, sig, args):
+        lld, = args
+        impl = cgctx.get_function('static_getitem', types.none(d, 0))
+        items = []
+        for k in range(len(keys)):
+            item = impl(builder, (lld, k),)
+            casted = cgctx.cast(builder, item, literal_tys[k], d.types[k])
+            items.append(casted)
+            cgctx.nrt.incref(builder, d.types[k], item)
+        ret = cgctx.make_tuple(builder, sig.return_type, items)
+        return ret
+    sig = types.Tuple(d.types)(d)
+    return sig, impl
+
+@overload_method(types.LiteralStrKeyDict, 'values')
+def impl_values(d):
+    # This requires faking a values() iterator simply as a tuple, creating a
+    # type specialising iterator would be possible but horrendous and end up
+    # down the "versioned" loop body route.
+    if not isinstance(d, types.LiteralStrKeyDict):
+        return
+    def impl(d):
+        return _mixed_values_to_tuple(d)
+    return impl
+
+
+@overload_method(types.LiteralStrKeyDict, 'keys')
+def impl_keys(d):
+    if not isinstance(d, types.LiteralStrKeyDict):
+        return
+    # create a key iterator by specialising a DictType instance with the
+    # literal keys and returning that
+    t = tuple([x.literal_value for x in d.literal_value.keys()])
+    def impl(d):
+        d = dict()
+        for x in t:
+            d[x] = 0
+        return d.keys()
+    return impl
+
+
+# have to lower_builtin as this inherits from tuple and literal, both of which
+# provide a match, hence ambiguous before proper resolution gets a chance
+@lower_builtin(operator.eq, types.LiteralStrKeyDict, types.LiteralStrKeyDict)
+def literalstrkeydict_impl_equals(context, builder, sig, args):
+    tu, tv = sig.args
+    u, v = args
+    pred = tu.literal_value == tv.literal_value
+    res = context.get_constant(types.boolean, pred)
+    return impl_ret_untracked(context, builder, sig.return_type, res)
+
+
+@lower_builtin(operator.ne, types.BaseTuple, types.BaseTuple)
+def tuple_ne(context, builder, sig, args):
+    res = builder.not_(literalstrkeydict_impl_equals(context, builder, sig,
+                                                     args))
+    return impl_ret_untracked(context, builder, sig.return_type, res)
+
+
+@overload(operator.getitem)
+@overload_method(types.LiteralStrKeyDict, 'get')
+def impl_get(dct, *args):
+    msg = ("Cannot get{item}() on a literal dictionary, return type cannot be "
+           "statically determined")
+    raise TypingError(msg)
+
+
+@overload_method(types.LiteralStrKeyDict, 'copy')
+def literalstrkeydict_impl_contains(d):
+    if not isinstance(d, types.LiteralStrKeyDict):
+        return
+    def impl(d):
+        return d
+    return impl
+
+
+@overload_method(types.LiteralStrKeyDict, 'items')
+def literalstrkeydict_impl_items(d):
+    if not isinstance(d, types.LiteralStrKeyDict):
+        return
+    tup = tuple([(k, v) for k, v in d.literal_value.items()])
+    def impl(d):
+        return tup
+    return impl
+
+
+@overload(operator.contains)
+def literalstrkeydict_impl_contains(d, k):
+    if not isinstance(d, types.LiteralStrKeyDict):
+        return
+    def impl(d, k):
+        return k in d.keys()
+    return impl
+
+
+@overload(operator.setitem)
+def banned_impl_setitem(d, key, value):
+    raise TypingError("Cannot mutate a literal dictionary")
+
+
+@overload(operator.delitem)
+def banned_impl_delitem(d, k):
+    raise TypingError("Cannot mutate a literal dictionary")
+
+
+@overload_method(types.LiteralStrKeyDict, 'popitem')
+@overload_method(types.LiteralStrKeyDict, 'pop')
+@overload_method(types.LiteralStrKeyDict, 'clear')
+@overload_method(types.LiteralStrKeyDict, 'setdefault')
+def impl_values(d, *args):
+    raise TypingError("Cannot mutate a literal dictionary")
+
+
+@lower_cast(types.LiteralDict, types.DictType)
+def literal_dict_to_dict(context, builder, fromty, toty, val):
+    assert fromty.key_type == toty.key_type
+    assert fromty.value_type == toty.value_type
+    return val

@@ -222,6 +222,7 @@ def typeddict_empty(cls, key_type, value_type):
 
 
 @box(types.DictType)
+@box(types.LiteralDict)
 def box_dicttype(typ, val, c):
     context = c.context
     builder = c.builder
@@ -276,11 +277,19 @@ def unbox_dicttype(typ, val, c):
     c.pyapi.decref(miptr)
     return NativeValue(dctobj, is_error=is_error)
 
-
-#
-# The following contains the logic for the type-inferred constructor
-#
-
+@unbox(types.LiteralDict)
+def unbox_literaldict(typ, val, c):
+    # TODO: something about this
+    keys = [x.literal_value for x in typ.literal_value.keys()]
+    values = [x.literal_value for x in typ.literal_value.values()]
+    d1 = {k:v for k, v in zip(keys, values)}
+    src="def convert():\n\treturn {}\n".format(d1)
+    ld = dict()
+    exec(src, {}, ld)
+    convert = ld['convert']
+    sig = typ()
+    is_error, dctobj = c.pyapi.call_jit_code(convert, sig, ())
+    return NativeValue(dctobj, is_error=is_error)
 
 @type_callable(DictType)
 def typeddict_call(context):

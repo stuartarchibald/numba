@@ -857,6 +857,7 @@ class BaseContext(object):
         for reuse in *.cached_internal_func*.
         """
         cache_key = (impl.__code__, sig, type(self.error_model))
+        cached = None
         if not caching:
             cached = None
         else:
@@ -864,7 +865,7 @@ class BaseContext(object):
                 # XXX This obviously won't work if a cell's value is
                 # unhashable.
                 cache_key += tuple(c.cell_contents for c in impl.__closure__)
-            cached = self.cached_internal_func.get(cache_key)
+                cached = self.cached_internal_func.get(cache_key)
         if cached is None:
             cres = self._compile_subroutine_no_cache(builder, impl, sig,
                                                      locals=locals,

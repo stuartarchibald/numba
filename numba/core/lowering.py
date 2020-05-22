@@ -1297,7 +1297,6 @@ class Lower(BaseLower):
         Store the value into the given variable.
         """
         fetype = self.typeof(name)
-
         # Define if not already
         self._alloca_var(name, fetype)
 
