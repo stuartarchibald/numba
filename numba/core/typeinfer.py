@@ -276,6 +276,7 @@ class BuildSetConstraint(_BuildContainerConstraint):
 
 
 class BuildMapConstraint(object):
+    # Constraint for typed dictionaries
 
     def __init__(self, target, items, loc):
         self.target = target
@@ -300,6 +301,8 @@ class BuildMapConstraint(object):
 
 
 class BuildLiteralStrKeysMapConstraint(object):
+    # Constraint for literal dictionaries where keys are literal strings and
+    # values can be anything const-like (heterogeneous values is fine).
 
     def __init__(self, target, items, literal_value, loc):
         self.target = target
@@ -312,6 +315,29 @@ class BuildLiteralStrKeysMapConstraint(object):
             typevars = typeinfer.typevars
             typeinfer.add_type(self.target,
                                 types.LiteralStrKeyDict(self.literal_value,),
+                                loc=self.loc)
+
+
+class BuildLiteralHomogeneousMapConstraint(object):
+    # Constraint for literal dictionaries where keys are homogeneous in type and
+    # values are homogeneous in type.
+
+    def __init__(self, target, items, literal_value, loc):
+        self.target = target
+        self.items = items
+        self.literal_value = literal_value
+        self.loc = loc
+
+    def __call__(self, typeinfer):
+        with new_error_context("typing of literal dict at {0}", self.loc):
+            typevars = typeinfer.typevars
+            tsets = [(typevars[k.name].getone(), typevars[v.name].getone())
+                     for k, v in self.items]
+            key_type, value_type = tsets[0]
+            typeinfer.add_type(self.target,
+                                types.LiteralDict(key_type,
+                                                    value_type,
+                                                    self.literal_value,),
                                 loc=self.loc)
 
 class ExhaustIterConstraint(object):
@@ -1613,14 +1639,56 @@ http://numba.pydata.org/numba-doc/latest/user/troubleshoot.html#my-code-has-an-u
             self.constraints.append(constraint)
         elif expr.op == 'build_map':
             if expr.literal_value is not None:
-                if all(isinstance(x, str) for x in expr.literal_value.keys()):
-                    constraint = BuildLiteralStrKeysMapConstraint(target.name,
-                                                                  items=expr.items,
-                                                                  literal_value = expr.literal_value,
-                                                                  loc=inst.loc)
+                # Filter out what sort of dict this could be, if the keys are
+                # heterogeneous then bail
+                dkeys = [*expr.literal_value.keys()]
+                dvals = [*expr.literal_value.values()]
+
+                # If the keys are strings and the values are heterogeneous
+                # then a LiteralStrKeyMap can be used
+
+                # If the keys are homogeneous in type and the values are
+                # homogeneous in type then a LiteralHomogeneousMap can be used,
+                # this is basically a typed dictionary with literal values
+                # attached that'll degrade to a typed dict if mutated.
+
+                str_keys = all(isinstance(x, str) for x in dkeys)
+                # typed dict looks at the first element in the curly braces
+                # ctor and then bakes that in as the type, emulate that here
+                def get_types(items, index):
+                    tys = []
+                    for item in items:
+                        tys.append(types.unliteral(
+                            self.typevars[item[index].name].type))
+                    return tys
+
+                ktys = get_types(expr.items, 0)
+                vtys = get_types(expr.items, 1)
+                homogeneous_keys = all(x == ktys[0] for x in ktys)
+                homogeneous_values = all(x == vtys[0] for x in vtys)
+
+                if str_keys:
+                    constraint = BuildLiteralStrKeysMapConstraint(
+                        target.name,
+                        items=expr.items,
+                        literal_value=expr.literal_value,
+                        loc=inst.loc)
+                elif homogeneous_keys and homogeneous_values:
+                    constraint = BuildLiteralHomogeneousMapConstraint(
+                        target.name, items=expr.items,
+                        literal_value = expr.literal_value,loc=inst.loc)
                 else:
-                    constraint = BuildMapConstraint(target.name, items=expr.items,
-                                                loc=inst.loc)
+                    token = ""
+                    if not homogeneous_keys:
+                        if not homogeneous_values:
+                            token = "keys and values"
+                        else:
+                            token = "key"
+                    elif not homogeneous_values:
+                        token = "value"
+                    msg = ("Literal dictionary with heterogeneous {} types is "
+                           "unsupported.".format(token))
+                    raise UnsupportedError(msg, loc=inst.loc)
             else:
                 constraint = BuildMapConstraint(target.name, items=expr.items,
                                                 loc=inst.loc)
