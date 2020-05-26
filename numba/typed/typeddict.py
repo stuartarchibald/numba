@@ -222,6 +222,7 @@ def typeddict_empty(cls, key_type, value_type):
 
 
 @box(types.DictType)
+@box(types.LiteralDict)
 def box_dicttype(typ, val, c):
     context = c.context
     builder = c.builder

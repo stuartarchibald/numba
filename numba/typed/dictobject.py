@@ -16,6 +16,7 @@ from numba.core.extending import (
     register_model,
     models,
     lower_builtin,
+    lower_cast,
 )
 from numba.core.imputils import iternext_impl, impl_ret_untracked
 from numba.core import types, cgutils
@@ -25,6 +26,7 @@ from numba.core.types import (
     DictKeysIterableType,
     DictValuesIterableType,
     DictIteratorType,
+    LiteralDict,
     Type,
 )
 from numba.core.imputils import impl_ret_borrowed, RefType
@@ -81,6 +83,7 @@ def new_dict(key, value):
 
 
 @register_model(DictType)
+@register_model(LiteralDict)
 class DictModel(models.StructModel):
     def __init__(self, dmm, fe_type):
         members = [
@@ -670,6 +673,8 @@ def impl_len(d):
 def impl_setitem(d, key, value):
     if not isinstance(d, types.DictType):
         return
+    if isinstance(d, types.LiteralDict): # cannot mutate a literal dict
+        return
 
     keyty, valty = d.key_type, d.value_type
 
@@ -743,6 +748,8 @@ def impl_getitem(d, key):
 def impl_popitem(d):
     if not isinstance(d, types.DictType):
         return
+    if isinstance(d, types.LiteralDict): # cannot mutate a literal dict
+        return
 
     def impl(d):
         status, keyval = _dict_popitem(d)
@@ -759,6 +766,8 @@ def impl_popitem(d):
 @overload_method(types.DictType, 'pop')
 def impl_pop(dct, key, default=None):
     if not isinstance(dct, types.DictType):
+        return
+    if isinstance(dct, types.LiteralDict): # cannot mutate a literal dict
         return
 
     keyty = dct.key_type
@@ -790,6 +799,8 @@ def impl_pop(dct, key, default=None):
 def impl_delitem(d, k):
     if not isinstance(d, types.DictType):
         return
+    if isinstance(d, types.LiteralDict): # cannot mutate a literal dict
+        return
 
     def impl(d, k):
         d.pop(k)
@@ -813,6 +824,8 @@ def impl_contains(d, k):
 @overload_method(types.DictType, 'clear')
 def impl_clear(d):
     if not isinstance(d, types.DictType):
+        return
+    if isinstance(d, types.LiteralDict): # cannot mutate a literal dict
         return
 
     def impl(d):
@@ -841,6 +854,8 @@ def impl_copy(d):
 @overload_method(types.DictType, 'setdefault')
 def impl_setdefault(dct, key, default=None):
     if not isinstance(dct, types.DictType):
+        return
+    if isinstance(dct, types.LiteralDict): # cannot mutate a literal dict
         return
 
     def impl(dct, key, default=None):
@@ -1067,8 +1082,9 @@ def build_map(context, builder, dict_type, item_types, items):
     else:
         from numba.typed import Dict
 
-        sig = typing.signature(dict_type)
+        dt = types.DictType(dict_type.key_type, dict_type.value_type)
         kt, vt = dict_type.key_type, dict_type.value_type
+        sig = typing.signature(dt)
 
         def make_dict():
             return Dict.empty(kt, vt)
@@ -1077,7 +1093,7 @@ def build_map(context, builder, dict_type, item_types, items):
 
         if items:
             for (kt, vt), (k, v) in zip(item_types, items):
-                sig = typing.signature(types.void, dict_type, kt, vt)
+                sig = typing.signature(types.void, dt, kt, vt)
                 args = d, k, v
 
                 def put(d, k, v):
@@ -1091,7 +1107,6 @@ def build_map(context, builder, dict_type, item_types, items):
 # ------------------------------------------------------------------------------
 # Literal dictionaries
 # ------------------------------------------------------------------------------
-
 
 def gen_keys_vals(thing):
     @overload_method(types.LiteralStrKeyDict, thing)
@@ -1179,3 +1194,10 @@ def banned_impl_delitem(d, k):
 @overload_method(types.LiteralStrKeyDict, 'setdefault')
 def impl_values(d, *args):
     raise TypingError("Cannot mutate a literal dictionary")
+
+
+@lower_cast(types.LiteralDict, types.DictType)
+def literal_dict_to_dict(context, builder, fromty, toty, val):
+    assert fromty.key_type == toty.key_type
+    assert fromty.value_type == toty.value_type
+    return val

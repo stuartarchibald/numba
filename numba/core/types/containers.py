@@ -642,6 +642,28 @@ class DictType(IterableType):
             if not other.is_precise():
                 return self
 
+
+class LiteralDict(Literal, DictType):
+    def __init__(self, keyty, valty, literal_value):
+        self.keyty = keyty
+        self.valty = valty
+        self._literal_init(literal_value)
+        DictType.__init__(self, keyty, valty)
+        self.name = 'Literal[Dict]({})'.format(literal_value)
+
+    def __unliteral__(self):
+        return DictType(self.keyty, self.valty)
+
+    def unify(self, typingctx, other):
+        """
+        Unify this with the *other* dictionary.
+        """
+        # If other is dict
+        if isinstance(other, DictType):
+            if not isinstance(other, Literal):
+                return DictType(self.keyty, self.valty)
+
+
 class LiteralStrKeyDict(Literal, NamedTuple):
     def __init__(self, literal_value):
         self._literal_init(literal_value)

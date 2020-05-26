@@ -714,7 +714,12 @@ class SetItemRefinement(object):
                     self.target.name, refined,
                     loc=self.loc,
                 )
-            if isinstance(targetty, types.LiteralStrKeyDict):
+            elif isinstance(targetty, types.LiteralStrKeyDict):
+                typeinfer.add_type(
+                    self.target.name, types.DictType(idxty, valty),
+                    loc=self.loc,
+                )
+            elif isinstance(targetty, types.LiteralDict):
                 typeinfer.add_type(
                     self.target.name, types.DictType(idxty, valty),
                     loc=self.loc,
