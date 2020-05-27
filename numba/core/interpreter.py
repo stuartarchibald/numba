@@ -991,8 +991,35 @@ class Interpreter(object):
         self.store(expr, res)
 
     def op_BUILD_MAP(self, inst, items, size, res):
-        items = [(self.get(k), self.get(v)) for k, v in items]
-        expr = ir.Expr.build_map(items=items, size=size, loc=self.loc)
+        got_items = [(self.get(k), self.get(v)) for k, v in items]
+
+        # sort out literal values, this is a bit contrived but is to handle
+        # situations like `{1: 10, 1: 10}` where the size of the literal dict
+        # is smaller than the definition
+        def get_literals(target):
+            literal_items = []
+            values = [self.get(v.name) for v in target]
+            for v in values:
+                defns = self.definitions[v.name]
+                if len(defns) != 1:
+                    break
+                defn = defns[0]
+                if not isinstance(defn, ir.Const):
+                    break
+                literal_items.append(defn.value)
+            return literal_items
+
+        literal_keys = get_literals(x[0] for x in got_items)
+        literal_values = get_literals(x[1] for x in got_items)
+
+        if (len(literal_keys) != len(got_items) or
+            len(literal_values) != len(got_items)):
+            literal_dict = None
+        else:
+            literal_dict = {x:y for x, y in zip(literal_keys, literal_values)}
+        expr = ir.Expr.build_map(items=got_items, size=size,
+                                 literal_value=literal_dict,
+                                 loc=self.loc)
         self.store(expr, res)
 
     def op_STORE_MAP(self, inst, dct, key, value):

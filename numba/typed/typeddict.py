@@ -277,10 +277,21 @@ def unbox_dicttype(typ, val, c):
     c.pyapi.decref(miptr)
     return NativeValue(dctobj, is_error=is_error)
 
+@unbox(types.LiteralDict)
+def unbox_literaldict(typ, val, c):
+    kt = typ.key_type
+    vt = typ.value_type
+    keys = [*typ.literal_value.keys()]
+    values = [*typ.literal_value.keys()]
+    def convert():
+        d = dictobject.new_dict(kt, vt)
+        for k, v in zip(keys, values):
+            d[k] = v
+        return d
+    sig = typ()
+    is_error, dctobj = c.pyapi.call_jit_code(convert, sig, ())
+    return NativeValue(dctobj, is_error=is_error)
 
-#
-# The following contains the logic for the type-inferred constructor
-#
 
 
 @type_callable(DictType)

@@ -1789,5 +1789,601 @@ class TestLiteralStrKeyDict(TestCase):
 
         self.assertEqual(foo(), (('a', 2j), ('c', 'd')))
 
+
+
+def assert_literal(x):
+    pass
+
+def assert_nonliteral(x):
+    pass
+
+def _checker_gen(op):
+    def checker_ol(x):
+        lv = getattr(x, 'literal_value', None)
+        assert op(lv is not None)
+        assert op(isinstance(x, types.LiteralDict))
+        return lambda x: None
+    return checker_ol
+
+import operator
+overload(assert_literal)(_checker_gen(operator.truth))
+overload(assert_nonliteral)(_checker_gen(operator.not_))
+
+class TestLiteralDict(MemoryLeakMixin, TestCase):
+
+    def test_valid_literal_values(self):
+        """
+        Exercise literal value collection
+        A single entry dict goes via BUILD_MAP whereas a multi-entry goes via
+        BUILD_CONST_KEY_MAP hence testing both here.
+        """
+        def bar1(x):
+            pass
+
+        @overload(bar1)
+        def ol_bar1(x):
+            self.assertEqual(x.literal_value, {1: 10.})
+            return lambda x: None
+
+        @njit
+        def foo1():
+            d = {1: 10.,}
+            assert_literal(d)
+            bar1(d)
+            return bool(d)
+
+        self.assertEqual(foo1(), True)
+
+        def bar3(x):
+            pass
+
+        @overload(bar3)
+        def ol_bar3(x):
+            self.assertEqual(x.literal_value, {1: 10., 2: 20., 3: 30.})
+            return lambda x: None
+
+        @njit
+        def foo3():
+            d = {1: 10., 2: 20., 3: 30.}
+            assert_literal(d)
+            bar3(d)
+            return bool(d)
+
+        self.assertEqual(foo3(), True)
+
+    def test_dict_bool(self):
+        """
+        Exercise bool(dict)
+        """
+        @njit
+        def foo():
+            d = {1: 10., 2: 20.}
+            assert_literal(d)
+            return bool(d)
+
+        self.assertEqual(foo(), True)
+
+    def test_dict_create(self):
+        """
+        Exercise dictionary creation and len
+        """
+        @njit
+        def foo1():
+            d = {1: 10,}
+            assert_literal(d)
+            return len(d)
+
+        self.assertEqual(foo1(), 1)
+
+        @njit
+        def foo2():
+            d = {1: 10, 2: 20}
+            assert_literal(d)
+            return len(d)
+
+        self.assertEqual(foo2(), 2)
+
+        @njit
+        def foo4():
+            d = {1: 10, 2: 20, 3: 30, 4:40}
+            assert_literal(d)
+            return len(d)
+
+        self.assertEqual(foo4(), 4)
+
+    def test_dict_get(self):
+        """
+        Exercise dictionary creation, insertion and get
+        """
+        @njit
+        def foo(targets):
+            d = {0: 0, 1: 1, 2: 2, 3: 3, 4: 4, 5: 5, 6: 6, 7: 7, 8: 8, 9: 9}
+            # retrieval loop
+            output = []
+            for t in targets:
+                output.append(d.get(t))
+            assert_nonliteral(d)
+            return output
+
+        self.assertEqual(foo([0, 1, 9, 10]), [0, 1, 9, None])
+        self.assertEqual(foo([-1, 9, 1]), [None, 9, 1])
+
+    def test_dict_get_with_default(self):
+        """
+        Exercise dict.get(k, d) where d is set
+        """
+        @njit
+        def foo(target, default):
+            d = {0: 0, 1: 1, 2: 2, 3: 3, 4: 4, 5: 5, 6: 6, 7: 7, 8: 8, 9: 9}
+            assert_nonliteral(d)
+            return d.get(target, default)
+
+        self.assertEqual(foo(3, -1), 3)
+        self.assertEqual(foo(10, -1), -1)
+
+    def test_dict_getitem(self):
+        """
+        Exercise dictionary __getitem__
+        """
+        @njit
+        def foo(target):
+            d = {1: 0.1, 2: 0.2, 3: 0.3}
+            assert_nonliteral(d)
+            return d[target]
+
+        self.assertEqual(foo(1), 0.1)
+        self.assertEqual(foo(2), 0.2)
+        self.assertEqual(foo(3), 0.3)
+        # check no leak so far
+        self.assert_no_memory_leak()
+        # disable leak check for exception test
+        self.disable_leak_check()
+        with self.assertRaises(KeyError):
+            foo(0)
+        with self.assertRaises(KeyError):
+            foo(4)
+
+    def test_dict_static_getitem(self):
+        """
+        Exercise dictionary (static) __getitem__
+        """
+        def gen(target):
+            def foo():
+                d = {1: 0.1, 2: 0.2, 3: 0.3}
+                assert_literal(d)
+                return d[target]
+            return njit(foo)
+
+        self.assertEqual(gen(1)(), 0.1)
+        self.assertEqual(gen(2)(), 0.2)
+        self.assertEqual(gen(3)(), 0.3)
+
+    def test_dict_popitem(self):
+        """
+        Exercise dictionary .popitem
+        """
+        @njit
+        def foo():
+            d = {1: 0.1, 2: 0.2, 3: 0.3}
+            assert_nonliteral(d)
+            # popitem
+            return d.popitem()
+
+        self.assertEqual(foo(), (3, 0.3))
+
+    def test_dict_popitem_many(self):
+        """
+        Exercise dictionary .popitem
+        """
+
+        @njit
+        def core(d, npop):
+            # popitem
+            keysum, valsum = 0, 0
+            for _ in range(npop):
+                k, v = d.popitem()
+                keysum += k
+                valsum -= v
+            return keysum, valsum
+
+        @njit
+        def foo(npop):
+            d = {1: 10, 2: 20, 3: 30}
+
+            return core(d, npop)
+
+        for i in range(3):
+            self.assertEqual(foo(i), core.py_func(i),)
+
+        # check no leak so far
+        self.assert_no_memory_leak()
+        # disable leak check for exception test
+        self.disable_leak_check()
+
+        with self.assertRaises(KeyError):
+            foo(4)
+
+    #def test_dict_pop(self):
+        #"""
+        #Exercise dictionary .pop
+        #"""
+        #@njit
+        #def foo(keys, vals, target):
+            #d = dictobject.new_dict(int32, float64)
+            ## insertion
+            #for k, v in zip(keys, vals):
+                #d[k] = v
+
+            ## popitem
+            #return d.pop(target, None), len(d)
+
+        #keys = [1, 2, 3]
+        #vals = [0.1, 0.2, 0.3]
+
+        #self.assertEqual(foo(keys, vals, 1), (0.1, 2))
+        #self.assertEqual(foo(keys, vals, 2), (0.2, 2))
+        #self.assertEqual(foo(keys, vals, 3), (0.3, 2))
+        #self.assertEqual(foo(keys, vals, 0), (None, 3))
+
+        ## check no leak so far
+        #self.assert_no_memory_leak()
+        ## disable leak check for exception test
+        #self.disable_leak_check()
+
+        #@njit
+        #def foo():
+            #d = dictobject.new_dict(int32, float64)
+            ## popitem
+            #return d.pop(0)
+
+        #with self.assertRaises(KeyError):
+            #foo()
+
+    #def test_dict_pop_many(self):
+        #"""
+        #Exercise dictionary .pop
+        #"""
+
+        #@njit
+        #def core(d, pops):
+            #total = 0
+            #for k in pops:
+                #total += k + d.pop(k, 0.123) + len(d)
+                #total *= 2
+            #return total
+
+        #@njit
+        #def foo(keys, vals, pops):
+            #d = dictobject.new_dict(int32, float64)
+            ## insertion
+            #for k, v in zip(keys, vals):
+                #d[k] = v
+            ## popitem
+            #return core(d, pops)
+
+        #keys = [1, 2, 3]
+        #vals = [0.1, 0.2, 0.3]
+        #pops = [2, 3, 3, 1, 0, 2, 1, 0, -1]
+
+        #self.assertEqual(
+            #foo(keys, vals, pops),
+            #core.py_func(dict(zip(keys, vals)), pops),
+        #)
+
+    #def test_dict_delitem(self):
+        #@njit
+        #def foo(keys, vals, target):
+            #d = dictobject.new_dict(int32, float64)
+            ## insertion
+            #for k, v in zip(keys, vals):
+                #d[k] = v
+            #del d[target]
+            #return len(d), d.get(target)
+
+        #keys = [1, 2, 3]
+        #vals = [0.1, 0.2, 0.3]
+        #self.assertEqual(foo(keys, vals, 1), (2, None))
+        #self.assertEqual(foo(keys, vals, 2), (2, None))
+        #self.assertEqual(foo(keys, vals, 3), (2, None))
+        ## check no leak so far
+        #self.assert_no_memory_leak()
+        ## disable leak check for exception test
+        #self.disable_leak_check()
+        #with self.assertRaises(KeyError):
+            #foo(keys, vals, 0)
+
+    #def test_dict_clear(self):
+        #"""
+        #Exercise dict.clear
+        #"""
+        #@njit
+        #def foo(keys, vals):
+            #d = dictobject.new_dict(int32, float64)
+            ## insertion
+            #for k, v in zip(keys, vals):
+                #d[k] = v
+            #b4 = len(d)
+            ## clear
+            #d.clear()
+            #return b4, len(d)
+
+        #keys = [1, 2, 3]
+        #vals = [0.1, 0.2, 0.3]
+        #self.assertEqual(foo(keys, vals), (3, 0))
+
+    #def test_dict_items(self):
+        #"""
+        #Exercise dict.items
+        #"""
+        #@njit
+        #def foo(keys, vals):
+            #d = dictobject.new_dict(int32, float64)
+            ## insertion
+            #for k, v in zip(keys, vals):
+                #d[k] = v
+            #out = []
+            #for kv in d.items():
+                #out.append(kv)
+            #return out
+
+        #keys = [1, 2, 3]
+        #vals = [0.1, 0.2, 0.3]
+
+        #self.assertEqual(
+            #foo(keys, vals),
+            #list(zip(keys, vals)),
+        #)
+
+        ## Test .items() on empty dict
+        #@njit
+        #def foo():
+            #d = dictobject.new_dict(int32, float64)
+            #out = []
+            #for kv in d.items():
+                #out.append(kv)
+            #return out
+
+        #self.assertEqual(foo(), [])
+
+    #def test_dict_keys(self):
+        #"""
+        #Exercise dict.keys
+        #"""
+        #@njit
+        #def foo(keys, vals):
+            #d = dictobject.new_dict(int32, float64)
+            ## insertion
+            #for k, v in zip(keys, vals):
+                #d[k] = v
+            #out = []
+            #for k in d.keys():
+                #out.append(k)
+            #return out
+
+        #keys = [1, 2, 3]
+        #vals = [0.1, 0.2, 0.3]
+
+        #self.assertEqual(
+            #foo(keys, vals),
+            #keys,
+        #)
+
+    #def test_dict_values(self):
+        #"""
+        #Exercise dict.values
+        #"""
+        #@njit
+        #def foo(keys, vals):
+            #d = dictobject.new_dict(int32, float64)
+            ## insertion
+            #for k, v in zip(keys, vals):
+                #d[k] = v
+            #out = []
+            #for v in d.values():
+                #out.append(v)
+            #return out
+
+        #keys = [1, 2, 3]
+        #vals = [0.1, 0.2, 0.3]
+
+        #self.assertEqual(
+            #foo(keys, vals),
+            #vals,
+        #)
+
+    #def test_dict_iter(self):
+        #"""
+        #Exercise iter(dict)
+        #"""
+        #@njit
+        #def foo(keys, vals):
+            #d = dictobject.new_dict(int32, float64)
+            ## insertion
+            #for k, v in zip(keys, vals):
+                #d[k] = v
+            #out = []
+            #for k in d:
+                #out.append(k)
+            #return out
+
+        #keys = [1, 2, 3]
+        #vals = [0.1, 0.2, 0.3]
+
+        #self.assertEqual(
+            #foo(keys, vals),
+            #[1, 2, 3]
+        #)
+
+    #def test_dict_contains(self):
+        #"""
+        #Exercise operator.contains
+        #"""
+        #@njit
+        #def foo(keys, vals, checklist):
+            #d = dictobject.new_dict(int32, float64)
+            ## insertion
+            #for k, v in zip(keys, vals):
+                #d[k] = v
+            #out = []
+            #for k in checklist:
+                #out.append(k in d)
+            #return out
+
+        #keys = [1, 2, 3]
+        #vals = [0.1, 0.2, 0.3]
+
+        #self.assertEqual(
+            #foo(keys, vals, [2, 3, 4, 1, 0]),
+            #[True, True, False, True, False],
+        #)
+
+    #def test_dict_copy(self):
+        #"""
+        #Exercise dict.copy
+        #"""
+        #@njit
+        #def foo(keys, vals):
+            #d = dictobject.new_dict(int32, float64)
+            ## insertion
+            #for k, v in zip(keys, vals):
+                #d[k] = v
+            #return list(d.copy().items())
+
+        #keys = list(range(20))
+        #vals = [x + i / 100 for i, x in enumerate(keys)]
+        #out = foo(keys, vals)
+        #self.assertEqual(out, list(zip(keys, vals)))
+
+    #def test_dict_setdefault(self):
+        #"""
+        #Exercise dict.setdefault
+        #"""
+        #@njit
+        #def foo():
+            #d = dictobject.new_dict(int32, float64)
+            #d.setdefault(1, 1.2)  # used because key is not in
+            #a = d.get(1)
+            #d[1] = 2.3
+            #b = d.get(1)
+            #d[2] = 3.4
+            #d.setdefault(2, 4.5)  # not used because key is in
+            #c = d.get(2)
+            #return a, b, c
+
+        #self.assertEqual(foo(), (1.2, 2.3, 3.4))
+
+    #def test_dict_equality(self):
+        #"""
+        #Exercise dict.__eq__ and .__ne__
+        #"""
+        #@njit
+        #def foo(na, nb, fa, fb):
+            #da = dictobject.new_dict(int32, float64)
+            #db = dictobject.new_dict(int32, float64)
+            #for i in range(na):
+                #da[i] = i * fa
+            #for i in range(nb):
+                #db[i] = i * fb
+            #return da == db, da != db
+
+        ## Same keys and values
+        #self.assertEqual(foo(10, 10, 3, 3), (True, False))
+        ## Same keys and diff values
+        #self.assertEqual(foo(10, 10, 3, 3.1), (False, True))
+        ## LHS has more keys
+        #self.assertEqual(foo(11, 10, 3, 3), (False, True))
+        ## RHS has more keys
+        #self.assertEqual(foo(10, 11, 3, 3), (False, True))
+
+    #def test_dict_equality_more(self):
+        #"""
+        #Exercise dict.__eq__
+        #"""
+        #@njit
+        #def foo(ak, av, bk, bv):
+            ## The key-value types are different in the two dictionaries
+            #da = dictobject.new_dict(int32, float64)
+            #db = dictobject.new_dict(int64, float32)
+            #for i in range(len(ak)):
+                #da[ak[i]] = av[i]
+            #for i in range(len(bk)):
+                #db[bk[i]] = bv[i]
+            #return da == db
+
+        ## Simple equal case
+        #ak = [1, 2, 3]
+        #av = [2, 3, 4]
+        #bk = [1, 2, 3]
+        #bv = [2, 3, 4]
+        #self.assertTrue(foo(ak, av, bk, bv))
+
+        ## Equal with replacement
+        #ak = [1, 2, 3]
+        #av = [2, 3, 4]
+        #bk = [1, 2, 2, 3]
+        #bv = [2, 1, 3, 4]
+        #self.assertTrue(foo(ak, av, bk, bv))
+
+        ## Diff values
+        #ak = [1, 2, 3]
+        #av = [2, 3, 4]
+        #bk = [1, 2, 3]
+        #bv = [2, 1, 4]
+        #self.assertFalse(foo(ak, av, bk, bv))
+
+        ## Diff keys
+        #ak = [0, 2, 3]
+        #av = [2, 3, 4]
+        #bk = [1, 2, 3]
+        #bv = [2, 3, 4]
+        #self.assertFalse(foo(ak, av, bk, bv))
+
+    #def test_dict_equality_diff_type(self):
+        #"""
+        #Exercise dict.__eq__
+        #"""
+        #@njit
+        #def foo(na, b):
+            #da = dictobject.new_dict(int32, float64)
+            #for i in range(na):
+                #da[i] = i
+            #return da == b
+
+        ## dict != int
+        #self.assertFalse(foo(10, 1))
+        ## dict != tuple[int]
+        #self.assertFalse(foo(10, (1,)))
+
+    #def test_dict_to_from_meminfo(self):
+        #"""
+        #Exercise dictobject.{_as_meminfo, _from_meminfo}
+        #"""
+        #@njit
+        #def make_content(nelem):
+            #for i in range(nelem):
+                #yield i, i + (i + 1) / 100
+
+        #@njit
+        #def boxer(nelem):
+            #d = dictobject.new_dict(int32, float64)
+            #for k, v in make_content(nelem):
+                #d[k] = v
+            #return dictobject._as_meminfo(d)
+
+        #dcttype = types.DictType(int32, float64)
+
+        #@njit
+        #def unboxer(mi):
+            #d = dictobject._from_meminfo(mi, dcttype)
+            #return list(d.items())
+
+        #mi = boxer(10)
+        #self.assertEqual(mi.refcount, 1)
+
+        #got = unboxer(mi)
+        #expected = list(make_content.py_func(10))
+        #self.assertEqual(got, expected)
+
+
 if __name__ == '__main__':
     unittest.main()
