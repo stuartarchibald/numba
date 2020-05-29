@@ -20,13 +20,14 @@ from numba.core.extending import (
 )
 from numba.core.datamodel.models import OpaqueModel
 from numba.core.cpu import InlineOptions
-from numba.core.compiler import DefaultPassBuilder, CompilerBase
+from numba.core.compiler import DefaultPassBuilder, CompilerBase, Flags
 from numba.core.typed_passes import IRLegalization
 from numba.core.untyped_passes import PreserveIR
 from itertools import product
 from numba.tests.support import (TestCase, unittest, skip_py38_or_later,
                                  MemoryLeakMixin)
-
+from numba.core import compiler
+from numba.core.inline_closurecall import InlineWorker
 
 class InlineTestPipeline(CompilerBase):
     """ Same as the standard pipeline, but preserves the func_ir into the
@@ -1125,6 +1126,71 @@ class TestInlineMiscIssues(TestCase):
             fn()
 
         self.assertIn("Something happened", str(raises.exception))
+
+
+class TestInlinerV2(TestCase):
+    # This tests the second version of the inliner!
+    # Class numba.core.inline_closurecall.InlineWorker
+
+    def test_inline_closure(self):
+        """ Tests numba.core.inline_closurecall.InlineWorker.inline_closure"""
+
+
+        inliner = InlineWorker(typingctx=None,
+                               targetctx=None,
+                               locals=None,
+                               pipeline=None,
+                               flags=Flags(),
+                               validator=None,
+                               typemap=None,
+                               calltypes=None)
+
+        def caller_func():
+            i = 10
+            SENTINEL = "SENTINEL"
+            def bar(z):
+                return i + z
+            res = bar(55)
+            j = 20 + res
+            return i + j
+
+        caller_ir = compiler.run_frontend(caller_func)
+        caller_ir.dump()
+        # assert single block
+        self.assertEqual(len(caller_ir.blocks), 1)
+
+        FREE = 11
+        def create_closure_obj(x):
+            y = 3
+            def closeover(z):
+                return x + y + z + FREE
+            return closeover
+
+        closure = create_closure_obj(9)
+        callee_ir_original, callee_blocks, var_dict, new_blocks = \
+            inliner.inline_closure(caller_ir,
+                                   caller_ir.blocks[0],
+                                   10,
+                                   closure,
+                                   create_closure_obj.__globals__,
+                                   replace_freevars=True,
+                                   arg_typs=None)
+
+        # Should produce 2 new blocks
+        # 1. The inlined function IR
+        # 2. An updated successor of the inline location
+        self.assertEqual(len(new_blocks), 2)
+
+        # Check there's no call anywhere in the new blocks
+        for (_, blk) in new_blocks:
+            print(_)
+            blk.dump()
+            self.assertEqual(len([*blk.find_exprs('call')]), 0)
+
+        # Variable dictionary should contain new variables with names from
+        # the closure. Check the new names are present
+        for v in closure.__code__.co_varnames:
+            self.assertIn(v, var_dict.keys())
 
 
 if __name__ == '__main__':

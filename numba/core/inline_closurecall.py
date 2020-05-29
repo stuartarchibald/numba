@@ -24,6 +24,7 @@ from numba.core.ir_utils import (
     simplify_CFG,
     canonicalize_array_math,
     dead_code_elimination,
+    _create_function_from_code_obj,
     )
 
 from numba.core.analysis import (
@@ -303,13 +304,13 @@ class InlineWorker(object):
 
         # check the stuff needed to run the more advanced compilation pipeline
         # is valid if any of it is provided
-        compiler_args = (targetctx, locals, pipeline, flags)
+        compiler_args = (targetctx, locals, pipeline)
         compiler_group = [x is not None for x in compiler_args]
         if any(compiler_group) and not all(compiler_group):
             check(targetctx, 'targetctx')
             check(locals, 'locals')
             check(pipeline, 'pipeline')
-            check(flags, 'flags')
+            #check(flags, 'flags')
         elif all(compiler_group):
             check(typingctx, 'typingctx')
 
@@ -456,7 +457,7 @@ class InlineWorker(object):
         """
         # create function from code object
         function, callee_code, callee_closure = \
-            self.convert_code_object_to_function(closure_obj, glbls)
+            self.convert_closure_to_function(closure_obj, glbls)
         # create IR from function
         callee_ir = self.run_untyped_passes(function)
         # Replace freevars with actual closure var in IR
@@ -475,7 +476,7 @@ class InlineWorker(object):
                 items = closure.items
             assert(len(callee_code.co_freevars) == len(items))
             _replace_freevars(callee_blocks, items)
-        freevars = closure_obj.code.co_freevars
+        freevars = closure_obj.__code__.co_freevars
         return self.inline_ir(caller_ir, block, i, callee_ir, freevars,
                               arg_typs=arg_typs)
 
@@ -543,13 +544,14 @@ class InlineWorker(object):
         self.typemap.update(f_typemap)
         self.calltypes.update(f_calltypes)
 
-    def convert_code_object_to_function(self, obj, glbls):
+    def convert_closure_to_function(self, obj, glbls):
         """ converts a code object (Python types CodeType) to a function using
         globals glbls. Returns the new function, the callee <code> object and
         the callee <closure> object"""
-        callee = obj
-        callee_code = callee.code if hasattr(callee, 'code') else callee.__code__
-        callee_closure = callee.closure if hasattr(callee, 'closure') else callee.__closure__
+        if not obj.__closure__:
+            raise TypeError("Function is not a closure")
+        callee_code = obj.__code__
+        callee_closure = obj.__closure__
         nfree = len(callee_code.co_freevars)
         func_env = "\n".join(["  c_%d = None" % i for i in range(nfree)])
         func_clo = ",".join(["c_%d" % i for i in range(nfree)])
