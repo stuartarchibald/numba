@@ -1964,12 +1964,12 @@ class TestLiteralDict(MemoryLeakMixin, TestCase):
         """
         @njit
         def foo():
-            d = {1: 0.1, 2: 0.2, 3: 0.3}
+            d = {1: 1, 2: 2, 3: 3}
             assert_nonliteral(d)
             # popitem
             return d.popitem()
 
-        self.assertEqual(foo(), (3, 0.3))
+        self.assertEqual(foo(), (3, 3))
 
     def test_dict_popitem_many(self):
         """
@@ -1993,7 +1993,8 @@ class TestLiteralDict(MemoryLeakMixin, TestCase):
             return core(d, npop)
 
         for i in range(3):
-            self.assertEqual(foo(i), core.py_func(i),)
+            d = {1: 10, 2: 20, 3: 30}
+            self.assertEqual(foo(i), core.py_func(d, i),)
 
         # check no leak so far
         self.assert_no_memory_leak()

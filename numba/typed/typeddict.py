@@ -279,20 +279,17 @@ def unbox_dicttype(typ, val, c):
 
 @unbox(types.LiteralDict)
 def unbox_literaldict(typ, val, c):
-    kt = typ.key_type
-    vt = typ.value_type
+    # TODO: something about this
     keys = [*typ.literal_value.keys()]
-    values = [*typ.literal_value.keys()]
-    def convert():
-        d = dictobject.new_dict(kt, vt)
-        for k, v in zip(keys, values):
-            d[k] = v
-        return d
+    values = [*typ.literal_value.values()]
+    d1 = {k:v for k, v in zip(keys, values)}
+    src="def convert():\n\treturn {}\n".format(d1)
+    ld = dict()
+    exec(src, {}, ld)
+    convert = ld['convert']
     sig = typ()
     is_error, dctobj = c.pyapi.call_jit_code(convert, sig, ())
     return NativeValue(dctobj, is_error=is_error)
-
-
 
 @type_callable(DictType)
 def typeddict_call(context):
