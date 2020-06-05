@@ -342,10 +342,13 @@ class BuildLiteralHomogeneousMapConstraint(object):
             tsets = [(typevars[k.name].getone(), typevars[v.name].getone())
                      for k, v in self.items]
             key_type, value_type = tsets[0]
+            resolved_dict = {}
+            for k, v in self.literal_value.items():
+                resolved_dict[types.literal(k)] = types.literal(v)
             typeinfer.add_type(self.target,
                                 types.LiteralDict(key_type,
-                                                    value_type,
-                                                    self.literal_value,),
+                                                  value_type,
+                                                  resolved_dict,),
                                 loc=self.loc)
 
 class ExhaustIterConstraint(object):
@@ -1688,11 +1691,17 @@ http://numba.pydata.org/numba-doc/latest/user/troubleshoot.html#my-code-has-an-u
                 literal_values = all(isinstance(x, types.Literal) for x in vliteraltys)
 
                 if str_keys:
-                    constraint = BuildLiteralStrKeysMapConstraint(
-                        target.name,
-                        items=expr.items,
-                        literal_value=expr.literal_value,
-                        loc=inst.loc)
+                    if homogeneous_values:
+                        constraint = BuildLiteralHomogeneousMapConstraint(
+                            target.name, items=expr.items,
+                            literal_value=expr.literal_value,
+                            loc=inst.loc)
+                    else:
+                        constraint = BuildLiteralStrKeysMapConstraint(
+                            target.name,
+                            items=expr.items,
+                            literal_value=expr.literal_value,
+                            loc=inst.loc)
                 elif homogeneous_keys and homogeneous_values:
                     if literal_keys and literal_values:
                         # this is for things like:
