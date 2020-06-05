@@ -27,7 +27,8 @@ from numba.core.errors import (TypingError, UntypedAttributeError,
                                new_error_context, termcolor, UnsupportedError,
                                ForceLiteralArg, CompilerError)
 from numba.core.funcdesc import qualifying_prefix
-
+from numba.core.interpreter import _UNKNOWN_VALUE
+from numba import typeof
 
 _logger = logging.getLogger(__name__)
 
@@ -313,8 +314,15 @@ class BuildLiteralStrKeysMapConstraint(object):
     def __call__(self, typeinfer):
         with new_error_context("typing of literal dict at {0}", self.loc):
             typevars = typeinfer.typevars
+            resolved_dict = {}
+            for k, v in self.literal_value.items():
+                if isinstance(v, _UNKNOWN_VALUE):
+                    value = typevars[k].getone()
+                else:
+                    value = typeof(v)
+                resolved_dict[types.literal(k)] = value
             typeinfer.add_type(self.target,
-                                types.LiteralStrKeyDict(self.literal_value,),
+                                types.LiteralStrKeyDict(resolved_dict,),
                                 loc=self.loc)
 
 

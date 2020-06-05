@@ -17,6 +17,13 @@ from numba.core.utils import (
 from numba.core.byteflow import Flow, AdaptDFA, AdaptCFA
 from numba.core.unsafe import eh
 
+class _UNKNOWN_VALUE(object):
+
+    def __init__(self, varname):
+        self.varname = varname
+
+    def __repr__(self):
+        return "_UNKNOWN_VALUE({})".format(self.varname)
 
 _logger = logging.getLogger(__name__)
 
@@ -919,8 +926,20 @@ class Interpreter(object):
             if not isinstance(defn, ir.Const):
                 break
             literal_items.append(defn.value)
+
+        def resolve_const(v):
+            defns = self.definitions[v]
+            if len(defns) != 1:
+                return _UNKNOWN_VALUE(v)
+            defn = defns[0]
+            if not isinstance(defn, ir.Const):
+                return _UNKNOWN_VALUE(v)
+            return defn.value
+
+
         if len(literal_items) != len(values):
-            literal_dict = None
+            literal_dict = {x: resolve_const(y) for x, y in
+                            zip(keytup, values)}
         else:
             literal_dict = {x:y for x, y in zip(keytup, literal_items)}
         expr = ir.Expr.build_map(items=items, size=2,
@@ -1012,11 +1031,16 @@ class Interpreter(object):
         literal_keys = get_literals(x[0] for x in got_items)
         literal_values = get_literals(x[1] for x in got_items)
 
-        if (len(literal_keys) != len(got_items) or
-            len(literal_values) != len(got_items)):
+        has_literal_keys = len(literal_keys) == len(got_items)
+        has_literal_values = len(literal_values) == len(got_items)
+
+        if not has_literal_keys and not has_literal_values:
             literal_dict = None
+        elif has_literal_keys and not has_literal_values:
+            literal_dict = {x: _UNKNOWN_VALUE(y[1]) for x, y in
+                            zip(literal_keys, got_items)}
         else:
-            literal_dict = {x:y for x, y in zip(literal_keys, literal_values)}
+            literal_dict = {x: y for x, y in zip(literal_keys, literal_values)}
         expr = ir.Expr.build_map(items=got_items, size=size,
                                  literal_value=literal_dict,
                                  loc=self.loc)

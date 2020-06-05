@@ -1075,10 +1075,24 @@ def build_map(context, builder, dict_type, item_types, items):
         from numba import typeof
         ty = typeof(dict_type.tuple_inst)
         sig = typing.signature(ty)
+
+        # NOTE TO SELF, this bit can be used for const stuff->const stuff dict
         const = dict_type.tuple_inst
-        def make_named_tuple():
-            return const
-        d = context.compile_internal(builder, make_named_tuple, sig, ())
+        #def make_named_tuple():
+            #return const
+        unliteral_tys = [types.unliteral(x) for x in dict_type.literal_value.values()]
+        nbty = types.NamedTuple(unliteral_tys,
+                                dict_type.tuple_ty)
+        values = [x[1] for x in items]
+        # replace with make_tuple call?
+        tup = context.get_constant_undef(nbty)
+        literal_tys = [x for x in dict_type.literal_value.values()]
+        for i, val in enumerate(values):
+            casted = context.cast(builder, val, literal_tys[i], unliteral_tys[i])
+            tup = builder.insert_value(tup, casted, i)
+        d = tup
+        context.nrt.incref(builder, nbty, d)
+
     else:
         from numba.typed import Dict
 

@@ -668,10 +668,13 @@ class LiteralStrKeyDict(Literal, NamedTuple):
     def __init__(self, literal_value):
         self._literal_init(literal_value)
         from collections import namedtuple
-        self.tuple_ty = namedtuple('_ntclazz', ' '.join(literal_value.keys()))
+        strkeys = [x.literal_value for x in literal_value.keys()]
+        self.tuple_ty = namedtuple('_ntclazz', ' '.join(strkeys))
         self.tuple_inst = self.tuple_ty(*literal_value.values())
         from numba import typeof
-        tys = [typeof(x) for x in literal_value.values()]
+        tys = [unliteral(x) for x in literal_value.values()]
+        #import pdb; pdb.set_trace()
+        #pass
         NamedTuple.__init__(self, tys, self.tuple_ty)
         self.name = 'LiteralStrKey[Dict]({})'.format(literal_value)
 
