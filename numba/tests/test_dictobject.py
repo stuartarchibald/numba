@@ -1822,12 +1822,12 @@ class TestLiteralDict(MemoryLeakMixin, TestCase):
 
         @overload(bar1)
         def ol_bar1(x):
-            self.assertEqual(x.literal_value, {1: 10.})
+            self.assertEqual(x.literal_value, {1: 10})
             return lambda x: None
 
         @njit
         def foo1():
-            d = {1: 10.,}
+            d = {1: 10,}
             assert_literal(d)
             bar1(d)
             return bool(d)
@@ -1839,12 +1839,12 @@ class TestLiteralDict(MemoryLeakMixin, TestCase):
 
         @overload(bar3)
         def ol_bar3(x):
-            self.assertEqual(x.literal_value, {1: 10., 2: 20., 3: 30.})
+            self.assertEqual(x.literal_value, {1: 10, 2: 20, 3: 30})
             return lambda x: None
 
         @njit
         def foo3():
-            d = {1: 10., 2: 20., 3: 30.}
+            d = {1: 10, 2: 20, 3: 30}
             assert_literal(d)
             bar3(d)
             return bool(d)
@@ -1857,7 +1857,7 @@ class TestLiteralDict(MemoryLeakMixin, TestCase):
         """
         @njit
         def foo():
-            d = {1: 10., 2: 20.}
+            d = {1: 10, 2: 20}
             assert_literal(d)
             return bool(d)
 
@@ -1949,14 +1949,14 @@ class TestLiteralDict(MemoryLeakMixin, TestCase):
         """
         def gen(target):
             def foo():
-                d = {1: 0.1, 2: 0.2, 3: 0.3}
+                d = {1: "10", 2: "20", 3: "30"}
                 assert_literal(d)
                 return d[target]
             return njit(foo)
 
-        self.assertEqual(gen(1)(), 0.1)
-        self.assertEqual(gen(2)(), 0.2)
-        self.assertEqual(gen(3)(), 0.3)
+        self.assertEqual(gen(1)(), "10")
+        self.assertEqual(gen(2)(), "20")
+        self.assertEqual(gen(3)(), "30")
 
     def test_dict_popitem(self):
         """

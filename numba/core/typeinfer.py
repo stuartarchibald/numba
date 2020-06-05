@@ -1668,17 +1668,24 @@ http://numba.pydata.org/numba-doc/latest/user/troubleshoot.html#my-code-has-an-u
                 str_keys = all(isinstance(x, str) for x in dkeys)
                 # typed dict looks at the first element in the curly braces
                 # ctor and then bakes that in as the type, emulate that here
-                def get_types(items, index):
+                def get_types(items, index, unliteral=True):
                     tys = []
                     for item in items:
-                        tys.append(types.unliteral(
-                            self.typevars[item[index].name].type))
+                        typ = self.typevars[item[index].name].type
+                        if unliteral:
+                            typ = types.unliteral(typ)
+                        tys.append(typ)
                     return tys
 
                 ktys = get_types(expr.items, 0)
                 vtys = get_types(expr.items, 1)
+                kliteraltys = get_types(expr.items, 0, False)
+                vliteraltys = get_types(expr.items, 1, False)
+
                 homogeneous_keys = all(x == ktys[0] for x in ktys)
                 homogeneous_values = all(x == vtys[0] for x in vtys)
+                literal_keys = all(isinstance(x, types.Literal) for x in kliteraltys)
+                literal_values = all(isinstance(x, types.Literal) for x in vliteraltys)
 
                 if str_keys:
                     constraint = BuildLiteralStrKeysMapConstraint(
@@ -1687,9 +1694,17 @@ http://numba.pydata.org/numba-doc/latest/user/troubleshoot.html#my-code-has-an-u
                         literal_value=expr.literal_value,
                         loc=inst.loc)
                 elif homogeneous_keys and homogeneous_values:
-                    constraint = BuildLiteralHomogeneousMapConstraint(
-                        target.name, items=expr.items,
-                        literal_value = expr.literal_value,loc=inst.loc)
+                    if literal_keys and literal_values:
+                        # this is for things like:
+                        # int->str, str->str, str->int, int->int
+                        constraint = BuildLiteralHomogeneousMapConstraint(
+                            target.name, items=expr.items,
+                            literal_value=expr.literal_value,
+                            loc=inst.loc)
+                    else:
+                        constraint = BuildMapConstraint(target.name,
+                                                        items=expr.items,
+                                                        loc=inst.loc)
                 else:
                     token = ""
                     if not homogeneous_keys:
