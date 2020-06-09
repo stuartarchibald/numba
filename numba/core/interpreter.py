@@ -930,10 +930,10 @@ class Interpreter(object):
         def resolve_const(v):
             defns = self.definitions[v]
             if len(defns) != 1:
-                return _UNKNOWN_VALUE(v)
+                return _UNKNOWN_VALUE(self.get(v).name)
             defn = defns[0]
             if not isinstance(defn, ir.Const):
-                return _UNKNOWN_VALUE(v)
+                return _UNKNOWN_VALUE(self.get(v).name)
             return defn.value
 
 

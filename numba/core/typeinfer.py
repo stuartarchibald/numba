@@ -121,6 +121,8 @@ class TypeVar(object):
 
     def getone(self):
         if self.type is None:
+            import pdb; pdb.set_trace()
+            pass
             raise TypingError("Undecided type {}".format(self))
         return self.type
 
@@ -317,7 +319,7 @@ class BuildLiteralStrKeysMapConstraint(object):
             resolved_dict = {}
             for k, v in self.literal_value.items():
                 if isinstance(v, _UNKNOWN_VALUE):
-                    value = typevars[k].getone()
+                    value = typevars[v.varname].getone()
                 else:
                     value = typeof(v)
                 resolved_dict[types.literal(k)] = value
