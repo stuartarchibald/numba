@@ -1675,6 +1675,9 @@ http://numba.pydata.org/numba-doc/latest/user/troubleshoot.html#my-code-has-an-u
                     tys = []
                     for item in items:
                         typ = self.typevars[item[index].name].type
+                        if typ is None:
+                            tys.append(item)
+                            continue
                         if unliteral:
                             typ = types.unliteral(typ)
                         tys.append(typ)
