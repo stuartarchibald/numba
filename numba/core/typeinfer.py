@@ -321,7 +321,9 @@ class BuildLiteralStrKeysMapConstraint(object):
                 if isinstance(v, _UNKNOWN_VALUE):
                     value = typevars[v.varname].getone()
                 else:
-                    value = typeof(v)
+                    value = types.maybe_literal(v)
+                    if value is None:
+                        value = typeof(v)
                 resolved_dict[types.literal(k)] = value
             typeinfer.add_type(self.target,
                                 types.LiteralStrKeyDict(resolved_dict,),

@@ -673,8 +673,6 @@ class LiteralStrKeyDict(Literal, NamedTuple):
         self.tuple_inst = self.tuple_ty(*literal_value.values())
         from numba import typeof
         tys = [unliteral(x) for x in literal_value.values()]
-        #import pdb; pdb.set_trace()
-        #pass
         NamedTuple.__init__(self, tys, self.tuple_ty)
         self.name = 'LiteralStrKey[Dict]({})'.format(literal_value)
 

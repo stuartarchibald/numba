@@ -1125,19 +1125,20 @@ def build_map(context, builder, dict_type, item_types, items):
 @intrinsic
 def _mixed_values_to_tuple(tyctx, d):
     keys = [x for x in d.literal_value.keys()]
-    valuetys = [x for x in d.literal_value.values()]
     fnty = tyctx.resolve_value_type('static_getitem')
+    literal_tys = [x for x in d.literal_value.values()]
     def impl(cgctx, builder, sig, args):
         lld, = args
         impl = cgctx.get_function('static_getitem', types.none(d, 0))
         items = []
         for k in range(len(keys)):
             item = impl(builder, (lld, k),)
-            items.append(item)
-            cgctx.nrt.incref(builder, valuetys[k], item)
+            casted = cgctx.cast(builder, item, literal_tys[k], d.types[k])
+            items.append(casted)
+            cgctx.nrt.incref(builder, d.types[k], item)
         ret = cgctx.make_tuple(builder, sig.return_type, items)
         return ret
-    sig = types.Tuple(valuetys)(d)
+    sig = types.Tuple(d.types)(d)
     return sig, impl
 
 @overload_method(types.LiteralStrKeyDict, 'values')
