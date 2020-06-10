@@ -280,8 +280,8 @@ def unbox_dicttype(typ, val, c):
 @unbox(types.LiteralDict)
 def unbox_literaldict(typ, val, c):
     # TODO: something about this
-    keys = [*typ.literal_value.keys()]
-    values = [*typ.literal_value.values()]
+    keys = [x.literal_value for x in typ.literal_value.keys()]
+    values = [x.literal_value for x in typ.literal_value.values()]
     d1 = {k:v for k, v in zip(keys, values)}
     src="def convert():\n\treturn {}\n".format(d1)
     ld = dict()
