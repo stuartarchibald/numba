@@ -857,6 +857,7 @@ class BaseContext(object):
         for reuse in *.cached_internal_func*.
         """
         cache_key = (impl.__code__, sig, type(self.error_model))
+        cached = None
         if not caching:
             cached = None
         else:
