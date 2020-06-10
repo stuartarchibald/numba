@@ -1672,7 +1672,7 @@ http://numba.pydata.org/numba-doc/latest/user/troubleshoot.html#my-code-has-an-u
                 # this is basically a typed dictionary with literal values
                 # attached that'll degrade to a typed dict if mutated.
 
-                str_keys = all(isinstance(x, str) for x in dkeys)
+                str_keys = all(isinstance(x, str) for x in dkeys) if dkeys else False
                 # typed dict looks at the first element in the curly braces
                 # ctor and then bakes that in as the type, emulate that here
                 def get_types(items, index, unliteral=True):
@@ -1692,10 +1692,10 @@ http://numba.pydata.org/numba-doc/latest/user/troubleshoot.html#my-code-has-an-u
                 kliteraltys = get_types(expr.items, 0, False)
                 vliteraltys = get_types(expr.items, 1, False)
 
-                homogeneous_keys = all(x == ktys[0] for x in ktys)
-                homogeneous_values = all(x == vtys[0] for x in vtys)
-                literal_keys = all(isinstance(x, types.Literal) for x in kliteraltys)
-                literal_values = all(isinstance(x, types.Literal) for x in vliteraltys)
+                homogeneous_keys = all(x == ktys[0] for x in ktys) if ktys else False
+                homogeneous_values = all(x == vtys[0] for x in vtys) if vtys else False
+                literal_keys = all(isinstance(x, types.Literal) for x in kliteraltys) if kliteraltys else False
+                literal_values = all(isinstance(x, types.Literal) for x in vliteraltys) if vliteraltys else False
 
                 if str_keys:
                     if homogeneous_values:
@@ -1722,17 +1722,10 @@ http://numba.pydata.org/numba-doc/latest/user/troubleshoot.html#my-code-has-an-u
                                                         items=expr.items,
                                                         loc=inst.loc)
                 else:
-                    token = ""
-                    if not homogeneous_keys:
-                        if not homogeneous_values:
-                            token = "keys and values"
-                        else:
-                            token = "key"
-                    elif not homogeneous_values:
-                        token = "value"
-                    msg = ("Literal dictionary with heterogeneous {} types is "
-                           "unsupported.".format(token))
-                    raise UnsupportedError(msg, loc=inst.loc)
+                    # might be able to coerce it as a standard dict via cast:
+                    constraint = BuildMapConstraint(target.name,
+                                                    items=expr.items,
+                                                    loc=inst.loc)
             else:
                 constraint = BuildMapConstraint(target.name, items=expr.items,
                                                 loc=inst.loc)
