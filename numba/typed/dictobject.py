@@ -1122,20 +1122,49 @@ def build_map(context, builder, dict_type, item_types, items):
 # Literal dictionaries
 # ------------------------------------------------------------------------------
 
-def gen_keys_vals(thing):
-    @overload_method(types.LiteralStrKeyDict, thing)
-    def impl_values(d):
-        if not isinstance(d, types.LiteralStrKeyDict):
-            return
-        container = getattr(d.literal_value, thing)
-        t = tuple(container())
-        def impl(d):
-            return t
-        return impl
+@intrinsic
+def _mixed_values_to_tuple(tyctx, d):
+    keys = [x for x in d.literal_value.keys()]
+    valuetys = [x for x in d.literal_value.values()]
+    fnty = tyctx.resolve_value_type('static_getitem')
+    def impl(cgctx, builder, sig, args):
+        lld, = args
+        impl = cgctx.get_function('static_getitem', types.none(d, 0))
+        items = []
+        for k in range(len(keys)):
+            item = impl(builder, (lld, k),)
+            items.append(item)
+            cgctx.nrt.incref(builder, valuetys[k], item)
+        ret = cgctx.make_tuple(builder, sig.return_type, items)
+        return ret
+    sig = types.Tuple(valuetys)(d)
+    return sig, impl
+
+@overload_method(types.LiteralStrKeyDict, 'values')
+def impl_values(d):
+    # This requires faking a values() iterator simply as a tuple, creating a
+    # type specialising iterator would be possible but horrendous and end up
+    # down the "versioned" loop body route.
+    if not isinstance(d, types.LiteralStrKeyDict):
+        return
+    def impl(d):
+        return _mixed_values_to_tuple(d)
+    return impl
 
 
-gen_keys_vals('keys')
-gen_keys_vals('values')
+@overload_method(types.LiteralStrKeyDict, 'keys')
+def impl_keys(d):
+    if not isinstance(d, types.LiteralStrKeyDict):
+        return
+    # create a key iterator by specialising a DictType instance with the
+    # literal keys and returning that
+    t = tuple([x.literal_value for x in d.literal_value.keys()])
+    def impl(d):
+        d = dict()
+        for x in t:
+            d[x] = 0
+        return d.keys()
+    return impl
 
 
 # have to lower_builtin as this inherits from tuple and literal, both of which
