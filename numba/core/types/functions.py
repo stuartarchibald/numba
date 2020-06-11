@@ -135,6 +135,12 @@ class _ResolutionFailures(object):
         # depth could potentially get massive, so limit it.
         ldepth = min(max(self._depth, 0), self._max_depth)
 
+        if 'getitem' in fn_name:
+            if isinstance(self._args[0], types.Array):
+                if isinstance(self._args[1], types.UniTuple):
+                    if self._args[0].ndim < self._args[1].count:
+                        raise errors.TypingError("too many indices for array")
+
         for i, (k, err_list) in enumerate(self._failures.items()):
             err = err_list[0]
             nduplicates = len(err_list)
