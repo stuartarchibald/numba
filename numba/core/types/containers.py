@@ -650,6 +650,15 @@ class LiteralDict(Literal, DictType):
         self._literal_init(literal_value)
         DictType.__init__(self, keyty, valty)
         self.name = 'Literal[Dict]({})'.format(literal_value)
+        literal_keys = [getattr(x, 'literal_value', None) for x in literal_value.keys()]
+        literal_vals = [getattr(x, 'literal_value', None) for x in literal_value.values()]
+        if isinstance(literal_keys[0], str):
+            from collections import namedtuple
+            self.tuple_ty = namedtuple('_ntclazz', ' '.join(literal_keys))
+            self.__literal_repr__ = self.tuple_ty(*literal_vals)
+        else:
+            self.__literal_repr__ = None
+
 
     def __unliteral__(self):
         return DictType(self.keyty, self.valty)
@@ -675,6 +684,12 @@ class LiteralStrKeyDict(Literal, NamedTuple):
         tys = [unliteral(x) for x in literal_value.values()]
         NamedTuple.__init__(self, tys, self.tuple_ty)
         self.name = 'LiteralStrKey[Dict]({})'.format(literal_value)
+        literal_vals = [getattr(x, 'literal_value', None) for x in literal_value.values()]
+        print("LITERAL _VALS", literal_vals)
+        if all(literal_vals):
+            self.__literal_repr__ = self.tuple_ty(*literal_vals)
+        else:
+            self.__literal_repr__ = None
 
     def __unliteral__(self):
         # return a solely type based version of this?! does it make any sense?
@@ -687,6 +702,7 @@ class LiteralStrKeyDict(Literal, NamedTuple):
         if isinstance(other, LiteralStrKeyDict):
             if self.literal_value == other.literal_value:
                 return self
+
 
 class DictItemsIterableType(SimpleIterableType):
     """Dictionary iterable type for .items()
