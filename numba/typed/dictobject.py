@@ -1215,12 +1215,13 @@ def literalstrkeydict_impl_items(d):
 
 @overload(operator.contains)
 def literalstrkeydict_impl_contains(d, k):
-    import pdb; pdb.set_trace()
-    pass
     if not isinstance(d, types.LiteralStrKeyDict):
         return
     def impl(d, k):
-        return k in d.keys()
+        for key in d.keys():
+            if k == key:
+                return True
+        return False
     return impl
 
 
