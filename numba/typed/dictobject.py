@@ -1195,7 +1195,7 @@ def impl_get(dct, *args):
 
 
 @overload_method(types.LiteralStrKeyDict, 'copy')
-def literalstrkeydict_impl_contains(d):
+def literalstrkeydict_impl_copy(d):
     if not isinstance(d, types.LiteralStrKeyDict):
         return
     def impl(d):
@@ -1215,6 +1215,8 @@ def literalstrkeydict_impl_items(d):
 
 @overload(operator.contains)
 def literalstrkeydict_impl_contains(d, k):
+    import pdb; pdb.set_trace()
+    pass
     if not isinstance(d, types.LiteralStrKeyDict):
         return
     def impl(d, k):

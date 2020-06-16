@@ -1667,7 +1667,10 @@ class TestLiteralStrKeyDict(TestCase):
 
         @overload(bar)
         def ol_bar(x):
-            self.assertEqual(x.literal_value, {'a': 1, 'b': 2j, 'c': 'd'})
+            self.assertEqual(x.literal_value,
+                             {types.literal('a'): types.literal(1),
+                              types.literal('b'): typeof(2j),
+                              types.literal('c'): types.literal('d')})
             def impl(x):
                 pass
             return impl
@@ -1818,7 +1821,8 @@ class TestLiteralDict(MemoryLeakMixin, TestCase):
 
         @overload(bar1)
         def ol_bar1(x):
-            self.assertEqual(x.literal_value, {1: 10})
+            self.assertEqual(x.literal_value,
+                             {types.literal(1): types.literal(10)})
             return lambda x: None
 
         @njit
@@ -1835,7 +1839,10 @@ class TestLiteralDict(MemoryLeakMixin, TestCase):
 
         @overload(bar3)
         def ol_bar3(x):
-            self.assertEqual(x.literal_value, {1: 10, 2: 20, 3: 30})
+            self.assertEqual(x.literal_value,
+                             {types.literal(1): types.literal(10),
+                              types.literal(2): types.literal(20),
+                              types.literal(3): types.literal(30),})
             return lambda x: None
 
         @njit
