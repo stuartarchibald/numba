@@ -687,14 +687,6 @@ class LiteralStrKeyDict(Literal, NamedTuple):
         NamedTuple.__init__(self, tys, self.tuple_ty)
         self.name = 'LiteralStrKey[Dict]({})'.format(literal_value)
         literal_vals = [getattr(x, 'literal_value', None) for x in literal_value.values()]
-        if all(literal_vals):
-            self.__literal_repr__ = self.tuple_ty(*literal_vals)
-        else:
-            self.__literal_repr__ = None
-
-    def __unliteral__(self):
-        # return a solely type based version of this?! does it make any sense?
-        return
 
     def unify(self, typingctx, other):
         """

@@ -1832,6 +1832,20 @@ class TestLiteralStrKeyDict(TestCase):
         self.assertPreciseEqual(foo(),
                                 (('a', 2j), ('c', 'd'), ('f', np.zeros((5)))))
 
+    def test_dict_escape(self):
+
+        @njit
+        def foo():
+            ld = {'a': 2j, 'c': 'd'}
+            return ld
+
+        # escaping heterogeneous dictionary is not supported
+        with self.assertRaises(TypeError) as raises:
+            foo()
+
+        excstr = str(raises.exception)
+        self.assertIn("cannot convert native LiteralStrKey", excstr)
+
 
 def assert_literal(x):
     pass
