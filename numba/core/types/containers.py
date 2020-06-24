@@ -593,7 +593,7 @@ def _sentry_forbidden_types(key, value):
 class DictType(IterableType):
     """Dictionary type
     """
-    def __init__(self, keyty, valty):
+    def __init__(self, keyty, valty, construction_value=None):
         assert not isinstance(keyty, TypeRef)
         assert not isinstance(valty, TypeRef)
         keyty = unliteral(keyty)
@@ -608,6 +608,7 @@ class DictType(IterableType):
         self.key_type = keyty
         self.value_type = valty
         self.keyvalue_type = Tuple([keyty, valty])
+        self.construction_value = construction_value
         name = '{}[{},{}]'.format(
             self.__class__.__name__,
             keyty,

@@ -121,8 +121,6 @@ class TypeVar(object):
 
     def getone(self):
         if self.type is None:
-            import pdb; pdb.set_trace()
-            pass
             raise TypingError("Undecided type {}".format(self))
         return self.type
 
@@ -281,10 +279,11 @@ class BuildSetConstraint(_BuildContainerConstraint):
 class BuildMapConstraint(object):
     # Constraint for typed dictionaries
 
-    def __init__(self, target, items, loc):
+    def __init__(self, target, items, loc, construction_value=None):
         self.target = target
         self.items = items
         self.loc = loc
+        self.construction_value = construction_value
 
     def __call__(self, typeinfer):
         with new_error_context("typing of dict at {0}", self.loc):
@@ -299,7 +298,8 @@ class BuildMapConstraint(object):
             else:
                 key_type, value_type = tsets[0]
                 typeinfer.add_type(self.target,
-                                   types.DictType(key_type, value_type),
+                                   types.DictType(key_type, value_type,
+                                                  self.construction_value),
                                    loc=self.loc)
 
 
@@ -1668,9 +1668,7 @@ http://numba.pydata.org/numba-doc/latest/user/troubleshoot.html#my-code-has-an-u
                 # then a LiteralStrKeyMap can be used
 
                 # If the keys are homogeneous in type and the values are
-                # homogeneous in type then a LiteralHomogeneousMap can be used,
-                # this is basically a typed dictionary with literal values
-                # attached that'll degrade to a typed dict if mutated.
+                # homogeneous in type then it's a typed dict
 
                 str_keys = all(isinstance(x, str) for x in dkeys) if dkeys else False
                 # typed dict looks at the first element in the curly braces
@@ -1687,46 +1685,29 @@ http://numba.pydata.org/numba-doc/latest/user/troubleshoot.html#my-code-has-an-u
                         tys.append(typ)
                     return tys
 
-                ktys = get_types(expr.items, 0)
                 vtys = get_types(expr.items, 1)
-                kliteraltys = get_types(expr.items, 0, False)
                 vliteraltys = get_types(expr.items, 1, False)
 
-                homogeneous_keys = all(x == ktys[0] for x in ktys) if ktys else False
                 homogeneous_values = all(x == vtys[0] for x in vtys) if vtys else False
-                literal_keys = all(isinstance(x, types.Literal) for x in kliteraltys) if kliteraltys else False
                 literal_values = all(isinstance(x, types.Literal) for x in vliteraltys) if vliteraltys else False
 
-                if str_keys:
-                    if homogeneous_values:
-                        constraint = BuildLiteralHomogeneousMapConstraint(
-                            target.name, items=expr.items,
-                            literal_value=expr.literal_value,
-                            loc=inst.loc)
-                    else:
-                        constraint = BuildLiteralStrKeysMapConstraint(
-                            target.name,
-                            items=expr.items,
-                            literal_value=expr.literal_value,
-                            loc=inst.loc)
-                elif homogeneous_keys and homogeneous_values:
-                    if literal_keys and literal_values:
-                        # this is for things like:
-                        # int->str, str->str, str->int, int->int
-                        constraint = BuildLiteralHomogeneousMapConstraint(
-                            target.name, items=expr.items,
-                            literal_value=expr.literal_value,
-                            loc=inst.loc)
-                    else:
-                        constraint = BuildMapConstraint(target.name,
-                                                        items=expr.items,
-                                                        loc=inst.loc)
+                if str_keys and not homogeneous_values:
+                    constraint = BuildLiteralStrKeysMapConstraint(
+                        target.name,
+                        items=expr.items,
+                        literal_value=expr.literal_value,
+                        loc=inst.loc)
                 else:
+                    if literal_values:
+                        construction_value = expr.literal_value
+                    else:
+                        construction_value = None
                     # might be able to coerce it as a standard dict via cast:
                     constraint = BuildMapConstraint(target.name,
                                                     items=expr.items,
-                                                    loc=inst.loc)
-            else:
+                                                    loc=inst.loc,
+                                                    construction_value=construction_value)
+            else: # no literal value, just build the typed dict constraint
                 constraint = BuildMapConstraint(target.name, items=expr.items,
                                                 loc=inst.loc)
             self.constraints.append(constraint)

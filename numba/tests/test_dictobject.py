@@ -11,7 +11,7 @@ import warnings
 
 import numpy as np
 
-from numba import njit
+from numba import njit, literal_unroll
 from numba import int32, int64, float32, float64
 from numba import typeof
 from numba.typed import Dict, dictobject
@@ -1644,11 +1644,19 @@ class TestLiteralStrKeyDict(TestCase):
 
     def test_basic_nonconst_in_scope(self):
         @njit
-        def foo():
-            ld = {'a': 1, 'b': 2j, 'c': 'd', 'd': np.ones(5,)}
+        def foo(x):
+            y = x + 5
+            e = True if y > 2 else False
+            ld = {'a': 1, 'b': 2j, 'c': 'd', 'non_const': e}
+            return ld['non_const']
 
-        # TODO: assert things
-        foo()
+        # Recall that key non_const has a value of a known type, bool, and it's
+        # value is stuffed in at run time, this is permitted as the dictionary
+        # is immutable in type
+        self.assertTrue(foo(34))
+        self.assertFalse(foo(-100))
+
+        # TODO: check literal_value
 
     def test_basic_nonconst_freevar(self):
         e = 5
@@ -1780,14 +1788,13 @@ class TestLiteralStrKeyDict(TestCase):
         self.assertEqual(foo(), (2j, 'd'))
 
     def test_dict_items(self):
-
         @njit
         def foo():
-            ld = {'a': 2j, 'c': 'd'}
+            ld = {'a': 2j, 'c': 'd', 'f': np.zeros((5))}
             return ld.items()
 
-        # TODO: fix this, it returns nonsense
-
+        self.assertPreciseEqual(foo(),
+                                (('a', 2j), ('c', 'd'), ('f', np.zeros((5)))))
 
 
 def assert_literal(x):

@@ -17,6 +17,7 @@ from numba.core.extending import (
     models,
     lower_builtin,
     lower_cast,
+    register_jitable,
 )
 from numba.core.imputils import iternext_impl, impl_ret_untracked
 from numba.core import types, cgutils
@@ -1202,14 +1203,37 @@ def literalstrkeydict_impl_copy(d):
         return d
     return impl
 
+@intrinsic
+def _str_items_mixed_values_to_tuple(tyctx, d):
+    from numba.cpython.unicode import make_string_from_constant
+    keys = [x for x in d.literal_value.keys()]
+    fnty = tyctx.resolve_value_type('static_getitem')
+    literal_tys = [x for x in d.literal_value.values()]
+    def impl(cgctx, builder, sig, args):
+
+        lld, = args
+        impl = cgctx.get_function('static_getitem', types.none(d, 0))
+        items = []
+        for k in range(len(keys)):
+            item = impl(builder, (lld, k),)
+            casted = cgctx.cast(builder, item, literal_tys[k], d.types[k])
+            cgctx.nrt.incref(builder, d.types[k], item)
+            keydata = make_string_from_constant(cgctx, builder, types.unicode_type, keys[k].literal_value)
+            pair = cgctx.make_tuple(builder, types.Tuple([types.unicode_type, d.types[k]]), (keydata, casted))
+            items.append(pair)
+        ret = cgctx.make_tuple(builder, sig.return_type, items)
+        return ret
+    kvs = [types.Tuple((types.unicode_type, x)) for x in d.types]
+    sig = types.Tuple(kvs)(d)
+    return sig, impl
+
 
 @overload_method(types.LiteralStrKeyDict, 'items')
 def literalstrkeydict_impl_items(d):
     if not isinstance(d, types.LiteralStrKeyDict):
         return
-    tup = tuple([(k, v) for k, v in d.literal_value.items()])
     def impl(d):
-        return tup
+        return _str_items_mixed_values_to_tuple(d)
     return impl
 
 

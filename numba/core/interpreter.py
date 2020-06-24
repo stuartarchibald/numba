@@ -936,7 +936,6 @@ class Interpreter(object):
                 return _UNKNOWN_VALUE(self.get(v).name)
             return defn.value
 
-
         if len(literal_items) != len(values):
             literal_dict = {x: resolve_const(y) for x, y in
                             zip(keytup, values)}
