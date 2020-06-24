@@ -1656,16 +1656,28 @@ class TestLiteralStrKeyDict(TestCase):
         self.assertTrue(foo(34))
         self.assertFalse(foo(-100))
 
-        # TODO: check literal_value
-
     def test_basic_nonconst_freevar(self):
         e = 5
+
+        def bar(x):
+            pass
+
+        @overload(bar)
+        def ol_bar(x):
+            self.assertEqual(x.literal_value,
+                             {types.literal('a'): types.literal(1),
+                              types.literal('b'): typeof(2j),
+                              types.literal('c'): types.literal('d'),
+                              types.literal('d'): types.literal(5)})
+            def impl(x):
+                pass
+            return impl
 
         @njit
         def foo():
             ld = {'a': 1, 'b': 2j, 'c': 'd', 'd': e}
+            bar(ld)
 
-        # TODO: assert things
         foo()
 
     def test_literal_value(self):
