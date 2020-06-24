@@ -170,28 +170,6 @@ def _typeof_list(val, c):
             )
     return types.List(ty, reflected=True)
 
-@typeof_impl.register(dict)
-def _typeof_dict(val, c):
-    if len(val) == 0:
-        raise ValueError("Cannot type empty d")
-    # scan keys/values make sure they are all the same type
-    keys = [*val.keys()]
-    values = [*val.values()]
-
-    #def check(thing, strthing):
-        #ty = typeof_impl(thing[0], c)
-        #if ty is None:
-            #raise ValueError("Cannot type dict %s of %s" % (strthing, ty))
-        #for x in thing[1:]:
-            #if typeof_impl(x, c) != ty:
-                #raise ValueError("Cannot type mixed %s type dictionary" % strthing)
-        #return ty
-    #import pdb; pdb.set_trace()
-    #pass
-    #keyty = check(keys, "key")
-    #valuety = check(values, "value")
-    return types.LiteralStrKeyDict(val)
-
 @typeof_impl.register(set)
 def _typeof_set(val, c):
     if len(val) == 0:
