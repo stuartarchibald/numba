@@ -1702,6 +1702,29 @@ class TestLiteralStrKeyDict(TestCase):
 
         foo()
 
+    def test_repeated_key_literal_value(self):
+
+        def bar(x):
+            pass
+
+        @overload(bar)
+        def ol_bar(x):
+            self.assertEqual(x.literal_value,
+                             {types.literal('a'): types.literal(10),
+                              types.literal('b'): typeof(2j),
+                              types.literal('c'): types.literal('d')})
+            def impl(x):
+                pass
+            return impl
+
+        @njit
+        def foo():
+            ld = {'a': 1, 'a': 10, 'b': 2j, 'c': 'd'}
+            bar(ld)
+
+        foo()
+
+
     def test_read_only(self):
 
         def _len():
@@ -1819,7 +1842,6 @@ def _checker_gen(op):
     def checker_ol(x):
         lv = getattr(x, 'literal_value', None)
         assert op(lv is not None)
-        assert op(isinstance(x, types.LiteralDict))
         return lambda x: None
     return checker_ol
 
@@ -1827,7 +1849,7 @@ import operator
 overload(assert_literal)(_checker_gen(operator.truth))
 overload(assert_nonliteral)(_checker_gen(operator.not_))
 
-class TestLiteralDict(MemoryLeakMixin, TestCase):
+class TestLiteralValuesInDict(MemoryLeakMixin, TestCase):
 
     def test_valid_literal_values(self):
         """
