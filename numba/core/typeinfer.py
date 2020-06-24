@@ -307,10 +307,11 @@ class BuildLiteralStrKeysMapConstraint(object):
     # Constraint for literal dictionaries where keys are literal strings and
     # values can be anything const-like (heterogeneous values is fine).
 
-    def __init__(self, target, items, literal_value, loc):
+    def __init__(self, target, items, literal_value, value_indexes, loc):
         self.target = target
         self.items = items
         self.literal_value = literal_value
+        self.value_indexes = value_indexes
         self.loc = loc
 
     def __call__(self, typeinfer):
@@ -326,7 +327,8 @@ class BuildLiteralStrKeysMapConstraint(object):
                         value = typeof(v)
                 resolved_dict[types.literal(k)] = value
             typeinfer.add_type(self.target,
-                                types.LiteralStrKeyDict(resolved_dict,),
+                                types.LiteralStrKeyDict(resolved_dict,
+                                                        self.value_indexes),
                                 loc=self.loc)
 
 
@@ -1696,6 +1698,7 @@ http://numba.pydata.org/numba-doc/latest/user/troubleshoot.html#my-code-has-an-u
                         target.name,
                         items=expr.items,
                         literal_value=expr.literal_value,
+                        value_indexes=expr.value_indexes,
                         loc=inst.loc)
                 else:
                     if literal_values:

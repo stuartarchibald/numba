@@ -941,8 +941,21 @@ class Interpreter(object):
                             zip(keytup, values)}
         else:
             literal_dict = {x:y for x, y in zip(keytup, literal_items)}
-        expr = ir.Expr.build_map(items=items, size=2,
-                                 literal_value=literal_dict, loc=self.loc)
+
+        # to deal with delights like {'a': 1, 'a': 'cat', 'b': 2, 'a': 2j}
+        # store the index of the actual used value for a given key, this 
+        # used when lowering to pull the right value out into the tuple repr
+        # of a mixed value type dictionary.
+        value_indexes = {}
+        for i, k in enumerate(keytup):
+            value_indexes[k] = i
+
+        expr = ir.Expr.build_map(items=items,
+                                 size=2,
+                                 literal_value=literal_dict,
+                                 value_indexes=value_indexes,
+                                 loc=self.loc)
+
         self.store(expr, res)
 
     def op_GET_ITER(self, inst, value, res):

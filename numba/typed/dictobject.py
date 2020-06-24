@@ -7,7 +7,7 @@ from enum import IntEnum
 
 from llvmlite import ir
 
-from numba import _helperlib
+from numba import _helperlib, typeof
 
 from numba.core.extending import (
     overload,
@@ -1073,23 +1073,31 @@ def impl_iterator_iternext(context, builder, sig, args, result):
 def build_map(context, builder, dict_type, item_types, items):
 
     if isinstance(dict_type, types.LiteralStrKeyDict):
-        from numba import typeof
         ty = typeof(dict_type.tuple_inst)
         sig = typing.signature(ty)
 
-        # NOTE TO SELF, this bit can be used for const stuff->const stuff dict
-        const = dict_type.tuple_inst
-        #def make_named_tuple():
-            #return const
-        unliteral_tys = [types.unliteral(x) for x in dict_type.literal_value.values()]
+        unliteral_tys = [types.unliteral(x) for x in 
+                         dict_type.literal_value.values()]
         nbty = types.NamedTuple(unliteral_tys,
                                 dict_type.tuple_ty)
         values = [x[1] for x in items]
         # replace with make_tuple call?
         tup = context.get_constant_undef(nbty)
         literal_tys = [x for x in dict_type.literal_value.values()]
-        for i, val in enumerate(values):
-            casted = context.cast(builder, val, literal_tys[i], unliteral_tys[i])
+
+        # this is to deal with repeated keys
+        value_index = dict_type.value_index
+        if value_index is None:
+            # 1:1 map keys:values
+            value_indexer = range(len(values))
+        else:
+            # 1:>1 map keys:values, e.g. {'a':1, 'a': 'foo'}
+            value_indexer = value_index.values()
+
+        for i, ix in enumerate(value_indexer):
+            val = values[ix]
+            casted = context.cast(builder, val, literal_tys[i],
+                                  unliteral_tys[i])
             tup = builder.insert_value(tup, casted, i)
         d = tup
         context.nrt.incref(builder, nbty, d)

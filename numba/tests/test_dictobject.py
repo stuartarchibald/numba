@@ -1709,8 +1709,9 @@ class TestLiteralStrKeyDict(TestCase):
 
         @overload(bar)
         def ol_bar(x):
+            # order is important, 'a' was seen first, but updated later
             self.assertEqual(x.literal_value,
-                             {types.literal('a'): types.literal(10),
+                             {types.literal('a'): types.literal('aaaa'),
                               types.literal('b'): typeof(2j),
                               types.literal('c'): types.literal('d')})
             def impl(x):
@@ -1719,7 +1720,7 @@ class TestLiteralStrKeyDict(TestCase):
 
         @njit
         def foo():
-            ld = {'a': 1, 'a': 10, 'b': 2j, 'c': 'd'}
+            ld = {'a': 1, 'a': 10, 'b': 2j, 'c': 'd', 'a': 'aaaa'}
             bar(ld)
 
         foo()

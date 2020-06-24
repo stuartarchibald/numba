@@ -675,8 +675,9 @@ class LiteralDict(Literal, DictType):
 
 
 class LiteralStrKeyDict(Literal, NamedTuple):
-    def __init__(self, literal_value):
+    def __init__(self, literal_value, value_index=None):
         self._literal_init(literal_value)
+        self.value_index = value_index
         from collections import namedtuple
         strkeys = [x.literal_value for x in literal_value.keys()]
         self.tuple_ty = namedtuple('_ntclazz', ' '.join(strkeys))
