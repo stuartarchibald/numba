@@ -327,7 +327,8 @@ class BuildMapConstraint(object):
                     init_value = self.special_value if literalvty else None
                     key_type, value_type = tsets[0]
                     typeinfer.add_type(self.target,
-                                       types.DictType(key_type, value_type,
+                                       types.DictType(key_type,
+                                                      value_type,
                                                       init_value),
                                        loc=self.loc)
 

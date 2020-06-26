@@ -608,13 +608,13 @@ class DictType(IterableType, InitialValue):
         self.key_type = keyty
         self.value_type = valty
         self.keyvalue_type = Tuple([keyty, valty])
-        self._initial_value = initial_value
         name = '{}[{},{}]'.format(
             self.__class__.__name__,
             keyty,
             valty,
         )
         super(DictType, self).__init__(name)
+        InitialValue.__init__(self, initial_value)
 
     def is_precise(self):
         return not any((

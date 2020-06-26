@@ -11,7 +11,7 @@ import warnings
 
 import numpy as np
 
-from numba import njit, literal_unroll
+from numba import njit, literal_unroll, literally
 from numba import int32, int64, float32, float64
 from numba import typeof
 from numba.typed import Dict, dictobject
@@ -1641,6 +1641,8 @@ class TestTypedDictInitialValues(MemoryLeakMixin, TestCase):
 
         @overload(bar)
         def ol_bar(d):
+            if d.initial_value is None:
+                return lambda d: literally(d)
             self.assertTrue(isinstance(d, types.DictType))
             self.assertEqual(d.initial_value, {'a': 1, 'b': 2, 'c': 3})
             self.assertEqual(hasattr(d, 'literal_value'), False)
@@ -1708,6 +1710,8 @@ class TestTypedDictInitialValues(MemoryLeakMixin, TestCase):
 
         @overload(bar)
         def ol_bar(d):
+            if d.initial_value is None:
+                return lambda d: literally(d)
             self.assertTrue(isinstance(d, types.DictType))
             self.assertEqual(d.initial_value, {'a': 1, 'b': 2, 'c': 3})
             return lambda d: d
