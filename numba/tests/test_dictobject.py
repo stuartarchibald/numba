@@ -1794,6 +1794,29 @@ class TestLiteralStrKeyDict(MemoryLeakMixin, TestCase):
 
         foo()
 
+    def test_list_and_array_as_value(self):
+
+        def bar(x):
+            pass
+
+        @overload(bar)
+        def ol_bar(x):
+            self.assertEqual(x.literal_value,
+                             {types.literal('a'): types.literal(1),
+                              types.literal('b'): types.List(types.intp),
+                              types.literal('c'): typeof(np.arange(5))})
+            def impl(x):
+                pass
+            return impl
+
+        @njit
+        def foo():
+            b = [1, 2, 3]
+            ld = {'a': 1, 'b': b, 'c': np.arange(5)}
+            bar(ld)
+
+        foo()
+
     def test_repeated_key_literal_value(self):
 
         def bar(x):
