@@ -286,6 +286,7 @@ class BuildMapConstraint(object):
         self.loc = loc
 
     def __call__(self, typeinfer):
+
         with new_error_context("typing of dict at {0}", self.loc):
             typevars = typeinfer.typevars
 
@@ -307,15 +308,10 @@ class BuildMapConstraint(object):
                 strkey = all([isinstance(x, types.StringLiteral) for x in ktys])
                 literalvty = all([isinstance(x, types.Literal) for x in vtys])
                 vt0 = types.unliteral(vtys[0])
-                # homogeneous also comes in the form of being able to cast
+                # homogeneous values comes in the form of being able to cast
                 # all the other values in the ctor to the type of the first
-                from numba.typed.typedobjectutils import _sentry_safe_cast
-
                 def check(other):
-                    try:
-                        return _sentry_safe_cast(other, vt0) is None
-                    except TypingError:
-                        return False
+                    return typeinfer.context.can_convert(other, vt0) is not None
                 homogeneous = all([check(types.unliteral(x)) for x in vtys])
                 if strkey and not homogeneous:
                     resolved_dict = {x: y for x, y in zip(ktys, vtys)}

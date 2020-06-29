@@ -2006,6 +2006,42 @@ class TestLiteralStrKeyDict(MemoryLeakMixin, TestCase):
 
         self.assertIn("Cannot unify LiteralStrKey", str(raises.exception))
 
+    def test_dict_value_coercion(self):
+        # checks that things coerce or not!
+
+        p = { # safe convertible: TypedDict
+            (np.int32, np.int32): types.DictType,
+            # unsafe but convertible: TypedDict
+            (np.int8, np.int32): types.DictType,
+             # safe convertible: TypedDict
+            (np.complex128, np.int32): types.DictType,
+            # unsafe not convertible: LiteralStrKey
+            (np.int32, np.complex128): types.LiteralStrKeyDict,
+            # unsafe not convertible: LiteralStrKey
+            (np.int32, np.array): types.LiteralStrKeyDict,
+            # unsafe not convertible: LiteralStrKey
+            (np.array, np.int32): types.LiteralStrKeyDict,
+            }
+
+        def bar(x):
+            pass
+
+        for dts, container in p.items():
+            @overload(bar)
+            def ol_bar(x):
+                self.assertTrue(isinstance(x, container))
+                def impl(x):
+                    pass
+                return impl
+
+            ty1, ty2 = dts
+
+            @njit
+            def foo():
+                d = {'a': ty1(1), 'b': ty2(2)}
+                bar(d)
+
+            foo()
 
 if __name__ == '__main__':
     unittest.main()
