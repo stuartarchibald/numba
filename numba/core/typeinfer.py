@@ -313,6 +313,16 @@ class BuildMapConstraint(object):
                 def check(other):
                     return typeinfer.context.can_convert(other, vt0) is not None
                 homogeneous = all([check(types.unliteral(x)) for x in vtys])
+                # Special cases:
+                # Single key:value in ctor, key is str, value is an otherwise
+                # illegal container type, e.g. LiteralStrKeyDict or
+                # List, there's no way to put this into a typed.Dict, so make it
+                # a LiteralStrKeyDict.
+                if len(vtys) == 1:
+                    valty = vtys[0]
+                    if isinstance(valty, (types.LiteralStrKeyDict, types.List)):
+                        homogeneous = False
+
                 if strkey and not homogeneous:
                     resolved_dict = {x: y for x, y in zip(ktys, vtys)}
                     typeinfer.add_type(self.target,

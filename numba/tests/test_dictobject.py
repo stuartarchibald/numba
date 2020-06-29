@@ -1980,6 +1980,7 @@ class TestLiteralStrKeyDict(MemoryLeakMixin, TestCase):
         self.assertEqual(foo(-100), foo.py_func(-100))
 
     def test_dict_not_unify(self):
+
         @njit
         def key_mismatch(x):
             if x + 7 > 4:
@@ -2042,6 +2043,31 @@ class TestLiteralStrKeyDict(MemoryLeakMixin, TestCase):
                 bar(d)
 
             foo()
+
+    def test_build_map_op_code(self):
+        # tests building dictionaries via `build_map`, which, for statically
+        # determinable str key->things cases is just a single key:value
+        # any other build_map would either end up as being non-const str keys
+        # or keys of some non-string type and therefore not considered.
+        def bar(x):
+            pass
+
+        @overload(bar)
+        def ol_bar(x):
+            #import pdb; pdb.set_trace()
+            #pass
+            def impl(x):
+                pass
+            return impl
+
+        @njit
+        def foo():
+            a = {'a': {'b1': 10, 'b2': 'string'}}
+            bar(a)
+
+        foo()
+
+
 
 if __name__ == '__main__':
     unittest.main()

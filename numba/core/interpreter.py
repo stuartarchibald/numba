@@ -943,7 +943,7 @@ class Interpreter(object):
             literal_dict = {x:y for x, y in zip(keytup, literal_items)}
 
         # to deal with delights like {'a': 1, 'a': 'cat', 'b': 2, 'a': 2j}
-        # store the index of the actual used value for a given key, this 
+        # store the index of the actual used value for a given key, this is
         # used when lowering to pull the right value out into the tuple repr
         # of a mixed value type dictionary.
         value_indexes = {}
@@ -1043,18 +1043,26 @@ class Interpreter(object):
         literal_keys = get_literals(x[0] for x in got_items)
         literal_values = get_literals(x[1] for x in got_items)
 
+
         has_literal_keys = len(literal_keys) == len(got_items)
         has_literal_values = len(literal_values) == len(got_items)
 
+        value_indexes = {}
         if not has_literal_keys and not has_literal_values:
             literal_dict = None
         elif has_literal_keys and not has_literal_values:
             literal_dict = {x: _UNKNOWN_VALUE(y[1]) for x, y in
                             zip(literal_keys, got_items)}
+            for i, k in enumerate(literal_keys):
+                value_indexes[k] = i
         else:
             literal_dict = {x: y for x, y in zip(literal_keys, literal_values)}
+            for i, k in enumerate(literal_keys):
+                value_indexes[k] = i
+
         expr = ir.Expr.build_map(items=got_items, size=size,
                                  literal_value=literal_dict,
+                                 value_indexes=value_indexes,
                                  loc=self.loc)
         self.store(expr, res)
 

@@ -652,14 +652,13 @@ class LiteralStrKeyDict(Literal, NamedTuple):
         strkeys = [x.literal_value for x in literal_value.keys()]
         self.tuple_ty = namedtuple('_ntclazz', ' '.join(strkeys))
         self.tuple_inst = self.tuple_ty(*literal_value.values())
-        from numba import typeof
         tys = [unliteral(x) for x in literal_value.values()]
         NamedTuple.__init__(self, tys, self.tuple_ty)
         self.name = 'LiteralStrKey[Dict]({})'.format(literal_value)
         literal_vals = [getattr(x, 'literal_value', None) for x in literal_value.values()]
 
     def __unliteral__(self):
-        pass
+        return self
 
     def unify(self, typingctx, other):
         """
