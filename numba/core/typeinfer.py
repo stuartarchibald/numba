@@ -288,8 +288,14 @@ class BuildListConstraint(_BuildContainerConstraint):
                 for typs in itertools.product(*tsets):
                     unified = typeinfer.context.unify_types(*typs)
                     if unified is not None:
+                        # pull out literals if available
+                        islit = [isinstance(x, types.Literal) for x in typs]
+                        iv = None
+                        if islit:
+                            iv = [x.literal_value for x in typs]
                         typeinfer.add_type(self.target,
-                                           types.List(unified),
+                                           types.List(unified,
+                                                      initial_value=iv),
                                            loc=self.loc)
                     else:
                         typeinfer.add_type(self.target,

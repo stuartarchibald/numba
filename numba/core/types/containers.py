@@ -387,19 +387,20 @@ class NamedTuple(_HeterogeneousTuple, BaseNamedTuple):
         return self.instance_class, self.types
 
 
-class List(MutableSequence):
+class List(MutableSequence, InitialValue):
     """
     Type class for (arbitrary-sized) homogeneous lists.
     """
     mutable = True
 
-    def __init__(self, dtype, reflected=False):
+    def __init__(self, dtype, reflected=False, initial_value=None):
         dtype = unliteral(dtype)
         self.dtype = dtype
         self.reflected = reflected
         cls_name = "reflected list" if reflected else "list"
         name = "%s(%s)" % (cls_name, self.dtype)
         super(List, self).__init__(name=name)
+        InitialValue.__init__(self, initial_value)
 
     def copy(self, dtype=None, reflected=None):
         if dtype is None:
