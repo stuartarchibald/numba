@@ -1185,6 +1185,8 @@ def tuple_ne(context, builder, sig, args):
 @overload(operator.getitem)
 @overload_method(types.LiteralStrKeyDict, 'get')
 def impl_get(dct, *args):
+    if not isinstance(dct, types.LiteralStrKeyDict):
+        return
     msg = ("Cannot get{item}() on a literal dictionary, return type cannot be "
            "statically determined")
     raise TypingError(msg)
@@ -1245,11 +1247,15 @@ def literalstrkeydict_impl_contains(d, k):
 
 @overload(operator.setitem)
 def banned_impl_setitem(d, key, value):
+    if not isinstance(d, types.LiteralStrKeyDict):
+        return
     raise TypingError("Cannot mutate a literal dictionary")
 
 
 @overload(operator.delitem)
 def banned_impl_delitem(d, k):
+    if not isinstance(d, types.LiteralStrKeyDict):
+        return
     raise TypingError("Cannot mutate a literal dictionary")
 
 
@@ -1258,6 +1264,8 @@ def banned_impl_delitem(d, k):
 @overload_method(types.LiteralStrKeyDict, 'clear')
 @overload_method(types.LiteralStrKeyDict, 'setdefault')
 def impl_values(d, *args):
+    if not isinstance(d, types.LiteralStrKeyDict):
+        return
     raise TypingError("Cannot mutate a literal dictionary")
 
 

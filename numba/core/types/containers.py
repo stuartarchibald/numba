@@ -433,6 +433,29 @@ class List(MutableSequence):
         return self.dtype
 
 
+class LiteralList(Literal, _HeterogeneousTuple):
+
+    mutable = False
+
+    def __init__(self, literal_value):
+        _HeterogeneousTuple.is_types_iterable(literal_value)
+        self._literal_init(literal_value)
+        tys = [unliteral(x) for x in literal_value]
+        self.types = tuple(literal_value)
+        self.count = len(self.types)
+        self.name = 'LiteralList({})'.format(literal_value)
+        literal_vals = [getattr(x, 'literal_value', None) for x in literal_value]
+
+    def __unliteral__(self):
+        pass
+
+    def unify(self, typingctx, other):
+        """
+        Unify this with the *other* one.
+        """
+        pass
+
+
 class ListIter(BaseContainerIterator):
     """
     Type class for list iterators.

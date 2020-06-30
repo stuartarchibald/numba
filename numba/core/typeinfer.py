@@ -269,7 +269,33 @@ class _BuildContainerConstraint(object):
 
 
 class BuildListConstraint(_BuildContainerConstraint):
-    container_type = types.List
+
+    def __init__(self, target, items, loc):
+        self.target = target
+        self.items = items
+        self.loc = loc
+
+    def __call__(self, typeinfer):
+        with new_error_context("typing of {0} at {1}",
+                               types.List, self.loc):
+            typevars = typeinfer.typevars
+            tsets = [typevars[i.name].get() for i in self.items]
+            if not tsets:
+                typeinfer.add_type(self.target,
+                                   types.List(types.undefined),
+                                   loc=self.loc)
+            else:
+                for typs in itertools.product(*tsets):
+                    unified = typeinfer.context.unify_types(*typs)
+                    if unified is not None:
+                        typeinfer.add_type(self.target,
+                                           types.List(unified),
+                                           loc=self.loc)
+                    else:
+                        typeinfer.add_type(self.target,
+                                           types.LiteralList(typs),
+                                           loc=self.loc)
+
 
 
 class BuildSetConstraint(_BuildContainerConstraint):
