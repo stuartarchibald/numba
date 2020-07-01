@@ -291,7 +291,7 @@ class BuildListConstraint(_BuildContainerConstraint):
                         # pull out literals if available
                         islit = [isinstance(x, types.Literal) for x in typs]
                         iv = None
-                        if islit:
+                        if all(islit):
                             iv = [x.literal_value for x in typs]
                         typeinfer.add_type(self.target,
                                            types.List(unified,
@@ -301,7 +301,6 @@ class BuildListConstraint(_BuildContainerConstraint):
                         typeinfer.add_type(self.target,
                                            types.LiteralList(typs),
                                            loc=self.loc)
-
 
 
 class BuildSetConstraint(_BuildContainerConstraint):

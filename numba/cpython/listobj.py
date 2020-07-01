@@ -1136,7 +1136,7 @@ def list_to_list(context, builder, fromty, toty, val):
 @overload_method(types.LiteralList, 'reverse')
 def banned_mutators(*args):
     # heterogeneous lists are a trick, they are really tuples
-    raise errors.TypingError("Cannot mutate a heterogeneous list")
+    raise errors.TypingError("Cannot mutate a literal list")
 
 _index_end = types.intp.maxval
 @overload_method(types.LiteralList, 'index')
@@ -1145,7 +1145,7 @@ def literal_list_index(lst, x, start=0, end=_index_end):
     # be able to statically analyse the bounds, then its a just loop body
     # versioning based iteration along with enumerate to find the item
     if isinstance(lst, types.LiteralList):
-        msg = "list.index is unsupported for heterogeneous lists"
+        msg = "list.index is unsupported for literal lists"
         raise errors.TypingError(msg)
 
 @overload_method(types.LiteralList, 'count')
@@ -1169,12 +1169,12 @@ def literal_list_count(lst):
 @overload(operator.delitem)
 def literal_list_delitem(lst, index):
     if isinstance(lst, types.LiteralList):
-        raise errors.TypingError("Cannot mutate a heterogeneous list")
+        raise errors.TypingError("Cannot mutate a literal list")
 
 @overload(operator.setitem)
 def literal_list_setitem(lst, index, value):
     if isinstance(lst, types.LiteralList):
-        raise errors.TypingError("Cannot mutate a heterogeneous list")
+        raise errors.TypingError("Cannot mutate a literal list")
 
 @overload(len)
 def literal_list_len(lst):

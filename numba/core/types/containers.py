@@ -448,13 +448,18 @@ class LiteralList(Literal, _HeterogeneousTuple):
         literal_vals = [getattr(x, 'literal_value', None) for x in literal_value]
 
     def __unliteral__(self):
-        pass
+        return self
 
     def unify(self, typingctx, other):
         """
         Unify this with the *other* one.
         """
-        pass
+        if isinstance(other, types.LiteralList) and self.count == other.count:
+            tys = []
+            for i1, i2 in zip(self.types, other.types):
+                tys.append(typingctx.unify_pairs(i1, i2))
+            if tys:
+                return LiteralList(tys)
 
 
 class ListIter(BaseContainerIterator):

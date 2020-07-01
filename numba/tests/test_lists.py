@@ -7,12 +7,13 @@ import ctypes as ct
 import numpy as np
 
 from numba.core.compiler import compile_isolated, Flags
-from numba import jit, typeof
+from numba import jit, typeof, njit
 import unittest
 from numba import testing
 from numba.core import types, utils, errors
 from numba.tests.support import TestCase, MemoryLeakMixin, tag
 from numba.experimental import jitclass
+from numba.core.extending import overload
 
 
 enable_pyobj_flags = Flags()
@@ -1410,6 +1411,112 @@ class TestListAndJitClasses(ManagedListTestCase):
         expect.more(3)
         got.more(3)
         self.assert_list_element_precise_equal(got.data, expect.data)
+
+
+class TestLiteralLists(MemoryLeakMixin, TestCase):
+
+    def test_basic_compile(self):
+        @njit
+        def foo():
+            l = [1, 'a']
+
+        foo()
+
+    def test_literal_value_passthrough(self):
+
+        def bar(x):
+            pass
+
+        @overload(bar)
+        def ol_bar(x):
+            print(x)
+            return lambda x: x
+
+        @njit
+        def foo():
+            l = {'a': [1, 'a', {'f': 1}, {'g': 'h', 'i': np.zeros(5)}], 'b': 2}
+            bar(l)
+
+        foo()
+
+    def test_literal_value_involved_passthrough(self):
+
+        def bar(x):
+            pass
+
+        @overload(bar)
+        def ol_bar(x):
+            print(x)
+            return lambda x: x
+
+        @njit
+        def foo():
+            l = {'a': [1, 'a', {'f': 1}, {'g': 'h', 'i': np.zeros(5)}], 'b': 2}
+            bar(l)
+
+        foo()
+
+    def test_mutation_failure(self):
+
+        def setitem():
+            l = ['a', 1]
+            l[0] = 'b'
+
+        def delitem():
+            l = ['a', 1]
+            del l[0]
+
+        def append():
+            l = ['a', 1]
+            l.append(2j)
+
+        def extend():
+            l = ['a', 1]
+            l.extend([2j, 3j])
+
+        def insert():
+            l = ['a', 1]
+            l.insert(0, 2j)
+
+        def remove():
+            l = ['a', 1]
+            l.remove('a')
+
+        def pop():
+            l = ['a', 1]
+            l.pop()
+
+        def clear():
+            l = ['a', 1]
+            l.clear()
+
+        def sort():
+            l = ['a', 1]
+            l.sort()
+
+        def reverse():
+            l = ['a', 1]
+            l.reverse()
+
+        illegals = (setitem, delitem, append, extend, insert, remove, pop,
+                    clear, sort, reverse)
+
+        for test in illegals:
+            with self.subTest(test.__name__):
+                with self.assertRaises(errors.TypingError) as raises:
+                    njit(test)()
+                expect = "Cannot mutate a literal list"
+                self.assertIn(expect, str(raises.exception))
+
+
+    def test_count(self):
+        pass
+
+    def test_len(self):
+        pass
+
+    def test_contains(self):
+        pass
 
 
 if __name__ == '__main__':
