@@ -1176,6 +1176,14 @@ def literal_list_setitem(lst, index, value):
     if isinstance(lst, types.LiteralList):
         raise errors.TypingError("Cannot mutate a literal list")
 
+@overload(operator.getitem)
+def literal_list_getitem(lst, *args):
+    if not isinstance(lst, types.LiteralList):
+        return
+    msg = ("Cannot __getitem__ on a literal list, return type cannot be "
+           "statically determined.")
+    raise errors.TypingError(msg)
+
 @overload(len)
 def literal_list_len(lst):
     if not isinstance(lst, types.LiteralList):

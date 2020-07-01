@@ -440,7 +440,7 @@ class LiteralList(Literal, _HeterogeneousTuple):
 
     def __init__(self, literal_value):
         _HeterogeneousTuple.is_types_iterable(literal_value)
-        self._literal_init(literal_value)
+        self._literal_init(list(literal_value))
         tys = [unliteral(x) for x in literal_value]
         self.types = tuple(literal_value)
         self.count = len(self.types)
@@ -454,7 +454,7 @@ class LiteralList(Literal, _HeterogeneousTuple):
         """
         Unify this with the *other* one.
         """
-        if isinstance(other, types.LiteralList) and self.count == other.count:
+        if isinstance(other, LiteralList) and self.count == other.count:
             tys = []
             for i1, i2 in zip(self.types, other.types):
                 tys.append(typingctx.unify_pairs(i1, i2))
