@@ -1709,9 +1709,7 @@ class TestLiteralLists(MemoryLeakMixin, TestCase):
         for x in (-100, 100):
             self.assertEqual(foo.py_func(x), foo(x))
 
-    @unittest.skip("Broken")
     def test_not_unify(self):
-        # TODO: fix infinite recursion problem
 
         @njit
         def foo(x):

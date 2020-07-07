@@ -434,6 +434,19 @@ class List(MutableSequence, InitialValue):
         return self.dtype
 
 
+class Poison(Type):
+
+    def __init__(self, ty):
+        self.ty = ty
+        super(Poison, self).__init__(name="Poison<%s>" % ty)
+
+    def __unliteral__(self):
+        return Poison(self)
+
+    def unify(self, typingctx, other):
+        return None
+
+
 class LiteralList(Literal, _HeterogeneousTuple):
 
     mutable = False
@@ -448,7 +461,7 @@ class LiteralList(Literal, _HeterogeneousTuple):
         literal_vals = [getattr(x, 'literal_value', None) for x in literal_value]
 
     def __unliteral__(self):
-        return self
+        return Poison(self)
 
     def unify(self, typingctx, other):
         """
@@ -458,7 +471,7 @@ class LiteralList(Literal, _HeterogeneousTuple):
             tys = []
             for i1, i2 in zip(self.types, other.types):
                 tys.append(typingctx.unify_pairs(i1, i2))
-            if tys:
+            if all(tys):
                 return LiteralList(tys)
 
 
@@ -692,7 +705,7 @@ class LiteralStrKeyDict(Literal, NamedTuple):
         literal_vals = [getattr(x, 'literal_value', None) for x in literal_value.values()]
 
     def __unliteral__(self):
-        return self
+        return Poison(self)
 
     def unify(self, typingctx, other):
         """
