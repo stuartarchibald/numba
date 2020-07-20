@@ -419,10 +419,11 @@ class List(MutableSequence, InitialValue):
         dtype = unliteral(dtype)
         self.dtype = dtype
         self.reflected = reflected
+        self._iv_store = initial_value
         cls_name = "reflected list" if reflected else "list"
         name = "%s(%s)<iv=%s>" % (cls_name, self.dtype, initial_value)
         super(List, self).__init__(name=name)
-        InitialValue.__init__(self, initial_value)
+        InitialValue.__init__(self, None)
 
     def copy(self, dtype=None, reflected=None):
         if dtype is None:
@@ -436,7 +437,15 @@ class List(MutableSequence, InitialValue):
             dtype = typingctx.unify_pairs(self.dtype, other.dtype)
             reflected = self.reflected or other.reflected
             if dtype is not None:
-                return List(dtype, reflected)
+                siv = self.initial_value
+                oiv = other.initial_value
+                if siv is not None and oiv is not None:
+                    use = siv
+                    if siv is None:
+                        use = oiv
+                    return List(dtype, reflected, use.initial_value)
+                else:
+                    return List(dtype, reflected)
 
     @property
     def key(self):

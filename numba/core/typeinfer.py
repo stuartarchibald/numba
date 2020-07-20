@@ -64,6 +64,8 @@ class TypeVar(object):
         else:
             if self.type is not None:
                 unified = self.context.unify_pairs(self.type, tp)
+                if isinstance(unified, types.List):
+                    print("MANAGED to unify", unified, unified.initial_value)
                 if unified is None:
                     msg = "Cannot unify %s and %s for '%s', defined at %s"
                     raise TypingError(msg % (self.type, tp, self.var,
@@ -590,14 +592,31 @@ class CallConstraint(object):
             folded = e.fold_arguments(folding_args, self.kws)
             requested = set()
             unsatisified = set()
+            ivs = set()
             for idx in e.requested_args:
                 maybe_arg = typeinfer.func_ir.get_definition(folded[idx])
+                maybe_iv = typeinfer.func_ir.get_definition(folded[idx], True)
                 if isinstance(maybe_arg, ir.Arg):
                     requested.add(maybe_arg.index)
+                elif isinstance(typevars[maybe_iv.name].getone(), types.InitialValue):
+                    if typevars[maybe_iv.name].getone().initial_value is None:
+                        ivs.add(maybe_iv)
                 else:
                     unsatisified.add(idx)
+
+            if ivs: # mangle types to inject the initial value into the type
+                for iv in ivs:
+                    ty = typevars[maybe_iv.name].getone()
+                    tmp = ty.copy()
+                    tmp._initial_value = ty._iv_store
+                    typeinfer.add_type(maybe_iv.name, tmp, maybe_iv.loc)
+
             if unsatisified:
                 raise TypingError("Cannot request literal type.", loc=self.loc)
+            elif ivs:
+                # re-resolve with mangled typemap
+                self.resolve(typeinfer, typevars, fnty)
+                sig = typeinfer.resolve_call(fnty, pos_args, kw_args)
             elif requested:
                 raise ForceLiteralArg(requested, loc=self.loc)
         if sig is None:
