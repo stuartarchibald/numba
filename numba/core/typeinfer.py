@@ -64,8 +64,6 @@ class TypeVar(object):
         else:
             if self.type is not None:
                 unified = self.context.unify_pairs(self.type, tp)
-                if isinstance(unified, types.List):
-                    print("MANAGED to unify", unified, unified.initial_value)
                 if unified is None:
                     msg = "Cannot unify %s and %s for '%s', defined at %s"
                     raise TypingError(msg % (self.type, tp, self.var,
@@ -615,8 +613,8 @@ class CallConstraint(object):
                 raise TypingError("Cannot request literal type.", loc=self.loc)
             elif ivs:
                 # re-resolve with mangled typemap
-                self.resolve(typeinfer, typevars, fnty)
                 sig = typeinfer.resolve_call(fnty, pos_args, kw_args)
+                #self.resolve(typeinfer, typevars, fnty)
             elif requested:
                 raise ForceLiteralArg(requested, loc=self.loc)
         if sig is None:

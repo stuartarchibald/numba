@@ -711,6 +711,21 @@ class DictType(IterableType, InitialValue):
         if isinstance(other, DictType):
             if not other.is_precise():
                 return self
+            else:
+                ukey_type = self.key_type == other.key_type
+                uvalue_type = self.value_type == other.value_type
+                if ukey_type and uvalue_type:
+                    siv = self.initial_value
+                    oiv = other.initial_value
+                    siv_none = siv is None
+                    oiv_none = oiv is None
+                    if siv_none and oiv_none:
+                        return DictType(ukey_type, uvalue_type)
+                    if siv_none ^ oiv_none:
+                        use = siv if not siv_none else oiv
+                        return DictType(self.key_type, self.value_type, use)
+
+
 
     @property
     def key(self):
