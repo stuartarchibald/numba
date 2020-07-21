@@ -673,11 +673,12 @@ class DictType(IterableType, InitialValue):
         self.key_type = keyty
         self.value_type = valty
         self.keyvalue_type = Tuple([keyty, valty])
+        self._iv_store = initial_value
         name = "{}[{},{}]<iv={}>".format(
             self.__class__.__name__, keyty, valty, initial_value
         )
         super(DictType, self).__init__(name)
-        InitialValue.__init__(self, initial_value)
+        InitialValue.__init__(self, None)
 
     def is_precise(self):
         return not any(
@@ -686,6 +687,9 @@ class DictType(IterableType, InitialValue):
                 isinstance(self.value_type, Undefined),
             )
         )
+
+    def copy(self):
+        return DictType(self.key_type, self.value_type)
 
     @property
     def iterator_type(self):
