@@ -606,13 +606,20 @@ class StaticGetItemTuple(AbstractTemplate):
 
     def generic(self, args, kws):
         tup, idx = args
+        ret = None
         if not isinstance(tup, types.BaseTuple):
             return
         if isinstance(idx, int):
             ret = tup.types[idx]
         elif isinstance(idx, slice):
             ret = types.BaseTuple.from_types(tup.types[idx])
-        return signature(ret, *args)
+        elif isinstance(tup, types.LiteralStrKeyDict):
+            if isinstance(idx, str):
+                lookup = tup.fields.index(idx)
+                ret = tup.types[lookup]
+        if ret is not None:
+            sig = signature(ret, *args)
+            return sig
 
 
 # Generic implementation for "not in"
@@ -702,6 +709,22 @@ class NumberAttribute(AttributeTemplate):
         assert not kws
         if not args:
             return signature(ty)
+
+
+@infer_getattr
+class NPTimedeltaAttribute(AttributeTemplate):
+    key = types.NPTimedelta
+
+    def resolve___class__(self, ty):
+        return types.NumberClass(ty)
+
+
+@infer_getattr
+class NPDatetimeAttribute(AttributeTemplate):
+    key = types.NPDatetime
+
+    def resolve___class__(self, ty):
+        return types.NumberClass(ty)
 
 
 @infer_getattr
