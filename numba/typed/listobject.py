@@ -660,61 +660,47 @@ def handle_slice(l, s):
 
 
 @intrinsic
-def _list_getitem(typingctx, l, index):
-    """Wrap numba_list_getitem
-
-    Returns 2-tuple of (int32, ?item_type)
-
-    """
-    IS_NOT_NONE = not isinstance(l.item_type, types.NoneType)
-    resty = types.Tuple([types.int32,
-                         types.Optional(l.item_type
-                                        if IS_NOT_NONE
-                                        else types.int64)])
-    sig = resty(l, index)
+def _list_getitem(typingctx, l_ty, index_ty):
+    resty = types.Tuple([types.int32, types.Optional(l_ty.item_type)])
+    sig = resty(l_ty, index_ty)
 
     def codegen(context, builder, sig, args):
-        fnty = ir.FunctionType(
-            ll_status,
-            [ll_list_type, ll_ssize_t, ll_bytes],
-        )
         [tl, tindex] = sig.args
         [l, index] = args
-        fn = builder.module.get_or_insert_function(
-            fnty, name='numba_list_getitem')
-
-        dm_item = context.data_model_manager[tl.item_type]
-        ll_item = context.get_data_type(tl.item_type)
-        ptr_item = cgutils.alloca_once(builder, ll_item)
+        fnty = ir.FunctionType(
+            ll_voidptr_type,
+            [ll_list_type],
+        )
+        fn = builder.module.get_or_insert_function(fnty,
+                                                   name='numba_list_base_ptr')
+        fn.attributes.add('alwaysinline')
+        fn.attributes.add('readonly')
 
         lp = _container_get_data(context, builder, tl, l)
-        status = builder.call(
+
+        base_ptr = builder.call(
             fn,
-            [
-                lp,
-                index,
-                _as_bytes(builder, ptr_item),
-            ],
+            [lp,],
         )
-        # Load item if output is available
-        found = builder.icmp_signed('>=', status,
-                                    status.type(int(ListStatus.LIST_OK)))
-        out = context.make_optional_none(builder,
-                                         tl.item_type
-                                         if IS_NOT_NONE
-                                         else types.int64)
+
+        llty = context.get_data_type(tl.item_type)
+        casted_base_ptr = builder.bitcast(base_ptr, llty.as_pointer())
+
+        item_ptr = cgutils.gep(builder, casted_base_ptr, index)
+
+
+        out = context.make_optional_none(builder, tl.item_type)
         pout = cgutils.alloca_once_value(builder, out)
 
-        with builder.if_then(found):
-            if IS_NOT_NONE:
-                item = dm_item.load_from_data_pointer(builder, ptr_item)
-                context.nrt.incref(builder, tl.item_type, item)
-                loaded = context.make_optional_value(
-                    builder, tl.item_type, item)
-                builder.store(loaded, pout)
+        dm_item = context.data_model_manager[tl.item_type]
+        item = dm_item.load_from_data_pointer(builder, item_ptr)
+        context.nrt.incref(builder, tl.item_type, item)
+        # probably need to actually do something about Optional
+        loaded = context.make_optional_value(builder, tl.item_type, item)
+        builder.store(loaded, pout)
 
         out = builder.load(pout)
-        return context.make_tuple(builder, resty, [status, out])
+        return context.make_tuple(builder, resty, [ll_status(0), out])
 
     return sig, codegen
 
