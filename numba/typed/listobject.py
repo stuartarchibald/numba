@@ -630,7 +630,7 @@ def fix_index(tyctx, list_ty, index_ty):
         [list_ty, index_ty] = sig.args
         [ll_list, ll_idx] = args
         is_negative = builder.icmp_signed('<', ll_idx, ir.Constant(ll_idx.type, 0))
-        fast_len_sig, length_fn = fastlen._defn(context.typing_context, list_ty)
+        fast_len_sig, length_fn = _list_length._defn(context.typing_context, list_ty)
         length = length_fn(context, builder, fast_len_sig, (ll_list,))
         wrapped_index = builder.add(ll_idx, length)
         return builder.select(is_negative, wrapped_index, ll_idx)
@@ -644,10 +644,7 @@ def handle_index(l, index):
     an IndexError.
     """
     # convert negative indices to positive ones
-    if index < 0:
-        # len(l) has always type 'int64'
-        # while index can be an signed/unsigned integer
-        index = type(index)(len(l) + index)
+    fix_index(l, index)
     # check that the index is in range
     if not (0 <= index < len(l)):
         raise IndexError("list index out of range")
@@ -706,7 +703,6 @@ def _list_getitem(typingctx, l_ty, index_ty):
 
         item_ptr = cgutils.gep(builder, casted_base_ptr, index)
 
-
         out = context.make_optional_none(builder, tl.item_type)
         pout = cgutils.alloca_once_value(builder, out)
 
@@ -735,7 +731,7 @@ def impl_getitem(l, index):
     if index in index_types:
         if IS_NOT_NONE:
             def integer_non_none_impl(l, index):
-                index = fix_index(l, index)
+                index = handle_index(l, index)
                 castedindex = _cast(index, indexty)
                 status, item = _list_getitem(l, castedindex)
                 if status == ListStatus.LIST_OK:
@@ -1266,6 +1262,14 @@ def ol_list_sort(lst, key=None, reverse=False):
             lst[:] = ordered
     return impl
 
+@overload_method(types.ListType, "getitem_unchecked")
+def ol_getitem_unchecked(lst, index):
+    if not isinstance(index, types.Integer):
+        return
+    def impl(lst, index):
+        item = fix_index(data, item)
+        castedindex = _cast(item, types.intp)
+        return operator.getitem(data, castedindex)
 
 @overload_attribute(types.ListType, '_dtype')
 def impl_dtype(l):
