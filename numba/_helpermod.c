@@ -150,6 +150,7 @@ build_c_helpers_dict(void)
     declmethod(list_set_method_table);
     declmethod(list_free);
     declmethod(list_base_ptr);
+    declmethod(list_size_address);
     declmethod(list_length);
     declmethod(list_allocated);
     declmethod(list_is_mutable);
