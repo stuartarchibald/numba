@@ -416,21 +416,26 @@ def _list_length(typingctx, l):
 
     Returns the length of the list.
     """
-    resty = types.intp
-    sig = resty(l)
-
+    sig = types.intp(l)
+    ll_voidptr_type = cgutils.voidptr_t
+    ll_list_type = cgutils.voidptr_t
+    ll_intp_type = cgutils.intp_t
     def codegen(context, builder, sig, args):
+        [tl] = sig.args
+        [l] = args
         fnty = ir.FunctionType(
-            ll_ssize_t,
+            ll_intp_type,
             [ll_list_type],
         )
         fn = builder.module.get_or_insert_function(fnty,
-                                                   name='numba_list_length')
-        [l] = args
-        [tl] = sig.args
+                                                    name='numba_list_size_address')
+        fn.attributes.add('alwaysinline')
+        fn.attributes.add('readonly')
+        fn.attributes.add('nounwind')
         lp = _container_get_data(context, builder, tl, l)
-        n = builder.call(fn, [lp])
-        return n
+        len_addr = builder.call(fn, [lp,],)
+        ptr = builder.inttoptr(len_addr, cgutils.intp_t.as_pointer())
+        return builder.load(ptr)
 
     return sig, codegen
 
@@ -618,6 +623,19 @@ def impl_append(l, item):
         return sig, impl
 
 
+@intrinsic
+def fix_index(tyctx, list_ty, index_ty):
+    sig = index_ty(list_ty, index_ty)
+    def codegen(context, builder, sig, args):
+        [list_ty, index_ty] = sig.args
+        [ll_list, ll_idx] = args
+        is_negative = builder.icmp_signed('<', ll_idx, ir.Constant(ll_idx.type, 0))
+        fast_len_sig, length_fn = fastlen._defn(context.typing_context, list_ty)
+        length = length_fn(context, builder, fast_len_sig, (ll_list,))
+        wrapped_index = builder.add(ll_idx, length)
+        return builder.select(is_negative, wrapped_index, ll_idx)
+    return sig, codegen
+
 @register_jitable
 def handle_index(l, index):
     """Handle index.
@@ -717,7 +735,7 @@ def impl_getitem(l, index):
     if index in index_types:
         if IS_NOT_NONE:
             def integer_non_none_impl(l, index):
-                index = handle_index(l, index)
+                index = fix_index(l, index)
                 castedindex = _cast(index, indexty)
                 status, item = _list_getitem(l, castedindex)
                 if status == ListStatus.LIST_OK:
