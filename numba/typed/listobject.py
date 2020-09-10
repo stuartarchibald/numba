@@ -625,15 +625,16 @@ def impl_append(l, item):
 
 @intrinsic
 def fix_index(tyctx, list_ty, index_ty):
-    sig = index_ty(list_ty, index_ty)
+    sig = types.uintp(list_ty, index_ty)
     def codegen(context, builder, sig, args):
         [list_ty, index_ty] = sig.args
         [ll_list, ll_idx] = args
         is_negative = builder.icmp_signed('<', ll_idx, ir.Constant(ll_idx.type, 0))
         fast_len_sig, length_fn = _list_length._defn(context.typing_context, list_ty)
         length = length_fn(context, builder, fast_len_sig, (ll_list,))
-        wrapped_index = builder.add(ll_idx, length)
-        return builder.select(is_negative, wrapped_index, ll_idx)
+        zextd_idx = builder.zext(ll_idx, length.type)
+        wrapped_index = builder.add(zextd_idx, length)
+        return builder.select(is_negative, wrapped_index, zextd_idx)
     return sig, codegen
 
 @register_jitable
