@@ -644,9 +644,10 @@ def handle_index(l, index):
     an IndexError.
     """
     # convert negative indices to positive ones
-    fix_index(l, index)
+    index = fix_index(l, index)
     # check that the index is in range
     if not (0 <= index < len(l)):
+        print("Index out of range", index, len(l))
         raise IndexError("list index out of range")
     return index
 
