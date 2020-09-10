@@ -647,8 +647,7 @@ def handle_index(l, index):
     # convert negative indices to positive ones
     index = fix_index(l, index)
     # check that the index is in range
-    if not (0 <= index < len(l)):
-        print("Index out of range", index, len(l))
+    if index < 0 or index >= len(l):
         raise IndexError("list index out of range")
     return index
 
@@ -691,6 +690,7 @@ def _list_getitem(typingctx, l_ty, index_ty):
         fn = builder.module.get_or_insert_function(fnty,
                                                    name='numba_list_base_ptr')
         fn.attributes.add('alwaysinline')
+        fn.attributes.add('nounwind')
         fn.attributes.add('readonly')
 
         lp = _container_get_data(context, builder, tl, l)
@@ -1269,9 +1269,11 @@ def ol_getitem_unchecked(lst, index):
     if not isinstance(index, types.Integer):
         return
     def impl(lst, index):
-        item = fix_index(data, item)
-        castedindex = _cast(item, types.intp)
-        return operator.getitem(data, castedindex)
+        index = fix_index(lst, index)
+        castedindex = _cast(index, types.intp)
+        _, item = _list_getitem(lst, castedindex)
+        return _nonoptional(item)
+    return impl
 
 @overload_attribute(types.ListType, '_dtype')
 def impl_dtype(l):
