@@ -270,31 +270,25 @@ class Cuda_selp(AbstractTemplate):
         return signature(a, test, a, a)
 
 
-@register
-class Cuda_atomic_add(AbstractTemplate):
-    key = cuda.atomic.add
+# generate atomic add/sub
+def _gen(l_key):
+    @register
+    class Cuda_atomic(AbstractTemplate):
+        key = l_key
 
-    def generic(self, args, kws):
-        assert not kws
-        ary, idx, val = args
+        def generic(self, args, kws):
+            assert not kws
+            ary, idx, val = args
 
-        if ary.ndim == 1:
-            return signature(ary.dtype, ary, types.intp, ary.dtype)
-        elif ary.ndim > 1:
-            return signature(ary.dtype, ary, idx, ary.dtype)
+            if ary.ndim == 1:
+                return signature(ary.dtype, ary, types.intp, ary.dtype)
+            elif ary.ndim > 1:
+                return signature(ary.dtype, ary, idx, ary.dtype)
+    return Cuda_atomic
 
-@register
-class Cuda_atomic_sub(AbstractTemplate):
-    key = cuda.atomic.sub
+Cuda_atomic_add = _gen(cuda.atomic.add)
+Cuda_atomic_sub = _gen(cuda.atomic.sub)
 
-    def generic(self, args, kws):
-        assert not kws
-        ary, idx, val = args
-
-        if ary.ndim == 1:
-            return signature(ary.dtype, ary, types.intp, ary.dtype)
-        elif ary.ndim > 1:
-            return signature(ary.dtype, ary, idx, ary.dtype)
 
 class Cuda_atomic_maxmin(AbstractTemplate):
     def generic(self, args, kws):
