@@ -3,6 +3,7 @@ import functools
 import locale
 import weakref
 import ctypes
+import re
 
 import llvmlite.llvmpy.core as lc
 import llvmlite.llvmpy.passes as lp
@@ -24,6 +25,25 @@ def _is_x86(triple):
     arch = triple.split('-')[0]
     return arch in _x86arch
 
+# LLVM source patterns which are unstable in optimisation, largely:
+# 1. Label names
+# 2. Phi node args
+# 3. preheader label
+_llvm_unstable = re.compile(
+                        r'|'.join([
+                            # unamed BB is just a plain number
+                            r'[0-9]+:',
+                            # with a proper identifer (see llvm langref)
+                            r'[\'"]?[-a-zA-Z$._0-9][-a-zA-Z$._0-9]*[\'"]?:',
+                            # is a start of a function definition
+                            r'^define',
+                            # no name
+                            r'^;\s*<label>',
+                            # phi node
+                            r'.*=\ phi\ .*',
+                            r'.*preheader[0-9]+.*',
+                        ])
+                        )
 
 def dump(header, body, lang):
     if config.HIGHLIGHT_DUMPS:
@@ -142,8 +162,36 @@ class CodeLibrary(object):
         """
         Internal: optimize this library's final module.
         """
+        DEBUG = False
+
+        def dump(mod, name, idx):
+            with open("dump_mod%s%s.ll" % (name, idx), 'wt') as f:
+                f.write(mod)
+
+        def hasher(src, attempt):
+            # walk the textual IR, drop lines that are known to be unstable
+            # across optimisation and hash the rest
+            new = []
+            for l in str(src).splitlines():
+                if not _llvm_unstable.match(l):
+                    new.append(l)
+            if DEBUG:
+                dump('\n'.join(new), src.name, attempt)
+            return hash(''.join(new))
+
+        # keep running the optimiser until the IR stabilises
         self._codegen._mpm.run(self._final_module)
-        self._final_module = remove_redundant_nrt_refct(self._final_module)
+        opt_hsh = hasher(self._final_module, 0)
+        max_attempts = 5
+        attempted = 0
+        while attempted < max_attempts:
+            self._codegen._mpm.run(self._final_module)
+            self._final_module = remove_redundant_nrt_refct(self._final_module)
+            new_hsh = hasher(self._final_module, attempted)
+            if opt_hsh == new_hsh:
+                break
+            opt_hsh = new_hsh
+            attempted += 1
 
     def _get_module_for_linking(self):
         """
