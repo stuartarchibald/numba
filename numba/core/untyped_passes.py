@@ -22,6 +22,19 @@ from numba.core.ir_utils import (guard, resolve_func_from_module, simplify_CFG,
 from numba.core.ssa import reconstruct_ssa
 from numba.core import interpreter
 
+from numba.extending import overload, intrinsic
+from llvmlite.llvmpy.core import Type as llvmpy_Type
+from llvmlite import ir as llvm_ir
+
+@intrinsic
+def trap(tyctx):
+    sig = types.void()
+    def codegen(cgctx, builder, sig, args):
+        fnty = llvmpy_Type.function(llvm_ir.VoidType(), [])
+        fn = builder.module.get_or_insert_function(fnty, name="llvm.trap")
+        builder.call(fn, ())
+    return sig, codegen
+
 
 @contextmanager
 def fallback_context(state, msg):
@@ -945,19 +958,24 @@ class MixedContainerUnroller(FunctionPass):
         elif_tplt = "\n\telif PLACEHOLDER_INDEX in (%s,):\n\t\tSENTINEL = None"
 
         b = ('def foo():\n\tif PLACEHOLDER_INDEX in (%s,):\n\t\t'
-             'SENTINEL = None\n%s\n\telse:\n\t\t'
-             'raise RuntimeError("Unreachable")')
+             'SENTINEL = None\n%s\n\telse:\n\t\t%s')
+        RUNTIME_ASSERTIONS = False
+        if RUNTIME_ASSERTIONS:
+            error_branch = 'raise RuntimeError("Unreachable")'
+        else:
+            error_branch = 'trap(); return'
         keys = [k for k in data.keys()]
 
         elifs = []
         for i in range(1, len(keys)):
             elifs.append(elif_tplt % ','.join(map(str, data[keys[i]])))
-        src = b % (','.join(map(str, data[keys[0]])), ''.join(elifs))
+        src = b % (','.join(map(str, data[keys[0]])), ''.join(elifs),
+                   error_branch)
         wstr = src
         l = {}
-        exec(wstr, {}, l)
+        exec(wstr, {'trap': trap}, l)
         bfunc = l['foo']
-        branches = compile_to_numba_ir(bfunc, {})
+        branches = compile_to_numba_ir(bfunc, {'trap': trap})
         for lbl, blk in branches.blocks.items():
             for stmt in blk.body:
                 if isinstance(stmt, ir.Assign):
