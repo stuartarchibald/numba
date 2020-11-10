@@ -434,7 +434,7 @@ class Compiler(CompilerBase):
             pms.append(
                 DefaultPassBuilder.define_objectmode_pipeline(self.state)
             )
-        return pms
+        return [pms[0]] # hack for now, stop fallback
 
 
 class DefaultPassBuilder(object):
