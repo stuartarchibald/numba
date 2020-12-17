@@ -76,6 +76,7 @@ def impl_boolean(key, ty, libfunc):
 
 def impl_unary(key, ty, libfunc):
     def lower_unary_impl(context, builder, sig, args):
+        print(f"Lowering for key {key}. Fastmath is {context.fastmath}")
         libfunc_impl = context.get_function(libfunc, typing.signature(ty, ty))
         return libfunc_impl(builder, args)
 
