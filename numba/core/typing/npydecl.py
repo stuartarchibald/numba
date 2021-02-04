@@ -1193,7 +1193,8 @@ class DiagCtor(CallableTemplate):
         return typer
 
 
-@infer_global(np.take)
+from numba.core.overload_glue import ol_take
+@ol_take.wrap_typing(np.take)
 class Take(AbstractTemplate):
 
     def generic(self, args, kws):
