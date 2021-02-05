@@ -3,8 +3,6 @@ Implementation of operations on Array objects and objects supporting
 the buffer protocol.
 """
 
-from numba.core.overload_glue import ol_take
-
 import functools
 import math
 import operator
@@ -33,7 +31,7 @@ from numba.core.extending import (register_jitable, overload, overload_method,
 from numba.misc import quicksort, mergesort
 from numba.cpython import slicing
 from numba.cpython.unsafe.tuple import tuple_setitem, build_full_slice_tuple
-
+from numba.core.overload_glue import overload_glue
 
 def set_range_metadata(builder, load, lower_bound, upper_bound):
     """
@@ -3762,7 +3760,7 @@ def numpy_diag_kwarg(context, builder, sig, args):
 
 
 @lower_builtin('array.take', types.Array, types.Integer)
-@ol_take.wrap_impl(np.take, types.Array, types.Integer)
+@overload_glue(np.take).wrap_impl(np.take, types.Array, types.Integer)
 def numpy_take_1(context, builder, sig, args):
 
     def take_impl(a, indices):
@@ -3775,7 +3773,7 @@ def numpy_take_1(context, builder, sig, args):
 
 
 @lower_builtin('array.take', types.Array, types.Array)
-@ol_take.wrap_impl(np.take, types.Array, types.Array)
+@overload_glue(np.take).wrap_impl(np.take, types.Array, types.Array)
 def numpy_take_2(context, builder, sig, args):
 
     F_order = sig.args[1].layout == 'F'
@@ -3801,9 +3799,9 @@ def numpy_take_2(context, builder, sig, args):
 
 
 @lower_builtin('array.take', types.Array, types.List)
-@ol_take.wrap_impl(np.take, types.Array, types.List)
+@overload_glue(np.take).wrap_impl(np.take, types.Array, types.List)
 @lower_builtin('array.take', types.Array, types.BaseTuple)
-@ol_take.wrap_impl(np.take, types.Array, types.BaseTuple)
+@overload_glue(np.take).wrap_impl(np.take, types.Array, types.BaseTuple)
 def numpy_take_3(context, builder, sig, args):
 
     def take_impl(a, indices):

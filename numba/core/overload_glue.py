@@ -73,4 +73,19 @@ class OverloadWrapper(object):
             return jit_wrapper
 
 
-ol_take = OverloadWrapper(np.take)
+class Gluer():
+    def __init__(self):
+        self._registered = dict()
+
+    def __call__(self, func):
+        if func in self._registered:
+            return self._registered[func]
+        else:
+            wrapper = OverloadWrapper(func)
+            self._registered[func] = wrapper
+            return wrapper
+
+
+overload_glue = Gluer()
+del Gluer
+

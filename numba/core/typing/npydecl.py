@@ -13,6 +13,7 @@ from numba.np.numpy_support import (ufunc_find_matching_loop,
                              carray, farray, _ufunc_loop_sig)
 from numba.core.errors import TypingError, NumbaPerformanceWarning
 from numba import pndindex
+from numba.core.overload_glue import overload_glue
 
 registry = Registry()
 infer = registry.register
@@ -1193,8 +1194,7 @@ class DiagCtor(CallableTemplate):
         return typer
 
 
-from numba.core.overload_glue import ol_take
-@ol_take.wrap_typing(np.take)
+@overload_glue(np.take).wrap_typing(np.take)
 class Take(AbstractTemplate):
 
     def generic(self, args, kws):
