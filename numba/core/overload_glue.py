@@ -22,6 +22,8 @@ class OverloadWrapper(object):
         def inner(typing_class):
             # arg is the typing class
             self._TYPER = typing_class
+            # HACK: This is a hack, infer_global maybe?
+            self._TYPER.key = self._function
             return typing_class
         return inner
 
@@ -55,11 +57,12 @@ class OverloadWrapper(object):
         @overload(self._function)
         def ol_generated(*args):
             @intrinsic
-            def intrin(tyctx, x, y):
+            def intrin(tyctx, *intrin_args):
                 msg = f"No typer registered for {self._function}"
                 assert self._TYPER is not None, msg
                 typing = self._TYPER(tyctx)
-                sig = typing.generic(args, {})
+                sig = typing.apply(intrin_args, {})
+                print(sig)
                 if self._selector is None:
                     self._assemble()
                 lowering = self._selector.find(sig.args)

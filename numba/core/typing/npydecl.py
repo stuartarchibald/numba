@@ -964,7 +964,7 @@ class Dot(MatMulTyperMixin, CallableTemplate):
         return typer
 
 
-@infer_global(np.vdot)
+@overload_glue(np.vdot).wrap_typing(np.vdot)
 class VDot(CallableTemplate):
 
     def generic(self):

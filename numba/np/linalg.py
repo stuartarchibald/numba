@@ -544,8 +544,8 @@ def dot_2(context, builder, sig, args):
 
 lower_builtin(operator.matmul, types.Array, types.Array)(dot_2)
 
-
-@lower_builtin(np.vdot, types.Array, types.Array)
+from numba.core.overload_glue import overload_glue
+@overload_glue(np.vdot).wrap_impl(np.vdot, types.Array, types.Array)
 def vdot(context, builder, sig, args):
     """
     np.vdot(a, b)
