@@ -142,8 +142,8 @@ class CPUContext(BaseContext):
 
 
     def post_lowering(self, mod, library):
-        if self.fastmath:
-            fastmathpass.rewrite_module(mod, self.fastmath)
+        #if self.fastmath:
+            #fastmathpass.rewrite_module(mod, self.fastmath)
 
         if self.is32bit:
             # 32-bit machine needs to replace all 64-bit div/rem to avoid

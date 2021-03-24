@@ -18,6 +18,7 @@ from numba.core.extending import (
     typeof_impl, type_callable, models, register_model, make_attribute_wrapper,
     )
 
+from numba.core.overload_glue import glue_typing
 
 @infer_global(print)
 class Print(AbstractTemplate):
@@ -172,7 +173,7 @@ class BinOp(ConcreteTemplate):
     cases += [signature(op, op, op) for op in sorted(types.complex_domain)]
 
 
-@infer_global(operator.add)
+@glue_typing(operator.add)
 class BinOpAdd(BinOp):
     pass
 

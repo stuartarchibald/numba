@@ -251,7 +251,7 @@ class BaseContext(object):
         self.cached_internal_func = {}
         self._pid = None
         self._codelib_stack = []
-
+        self._flags = None
         self._boundscheck = False
 
         self.data_model_manager = datamodel.default_manager
