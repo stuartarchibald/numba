@@ -15,6 +15,7 @@ from numba.core.imputils import (lower_builtin, lower_getattr,
 from numba.core import typing, types, utils, errors, cgutils, optional
 from numba.core.extending import intrinsic, overload_method
 from numba.cpython.unsafe.numbers import viewer
+from numba.core.overload_glue import overload_glue, glue_wrap
 
 def _int_arith_flags(rettype):
     """
@@ -519,7 +520,7 @@ lower_builtin(operator.pos, types.boolean)(bool_unary_positive_impl)
 def _implement_integer_operators():
     ty = types.Integer
 
-    lower_builtin(operator.add, ty, ty)(int_add_impl)
+    overload_glue(operator.add).wrap_impl(operator.add, ty, ty)(int_add_impl)
     lower_builtin(operator.iadd, ty, ty)(int_add_impl)
     lower_builtin(operator.sub, ty, ty)(int_sub_impl)
     lower_builtin(operator.isub, ty, ty)(int_sub_impl)
@@ -581,7 +582,10 @@ _implement_bitwise_operators()
 
 
 def real_add_impl(context, builder, sig, args):
-    res = builder.fadd(*args)
+    flags = ()
+    if bool(context._flags.fastmath):
+        flags = ('fast',)
+    res = builder.fadd(*args, flags=flags)
     return impl_ret_untracked(context, builder, sig.return_type, res)
 
 
@@ -890,7 +894,7 @@ def real_sign_impl(context, builder, sig, args):
 
 ty = types.Float
 
-lower_builtin(operator.add, ty, ty)(real_add_impl)
+overload_glue(operator.add).wrap_impl(operator.add, ty, ty)(real_add_impl)
 lower_builtin(operator.iadd, ty, ty)(real_add_impl)
 lower_builtin(operator.sub, ty, ty)(real_sub_impl)
 lower_builtin(operator.isub, ty, ty)(real_sub_impl)
@@ -1144,7 +1148,7 @@ def complex_abs_impl(context, builder, sig, args):
 
 ty = types.Complex
 
-lower_builtin(operator.add, ty, ty)(complex_add_impl)
+overload_glue(operator.add).wrap_impl(operator.add, ty, ty)(complex_add_impl)
 lower_builtin(operator.iadd, ty, ty)(complex_add_impl)
 lower_builtin(operator.sub, ty, ty)(complex_sub_impl)
 lower_builtin(operator.isub, ty, ty)(complex_sub_impl)

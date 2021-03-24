@@ -20,7 +20,8 @@ class BaseLower(object):
     Lower IR to LLVM
     """
 
-    def __init__(self, context, library, fndesc, func_ir, metadata=None):
+    def __init__(self, context, library, fndesc, func_ir, metadata=None,
+                 flags=None):
         self.library = library
         self.fndesc = fndesc
         self.blocks = utils.SortedMap(func_ir.blocks.items())
@@ -47,7 +48,8 @@ class BaseLower(object):
         # This adds:
         #  - environment: the python execution environment
         self.context = context.subtarget(environment=self.env,
-                                         fndesc=self.fndesc)
+                                         fndesc=self.fndesc,
+                                         _flags=flags)
 
         # Debuginfo
         dibuildercls = (self.context.DIBuilder
