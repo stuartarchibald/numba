@@ -518,9 +518,6 @@ class _Kernel(serialize.ReduceMixin):
     def __init__(self, py_func, argtypes, link=None, debug=False, inline=False,
                  fastmath=False, extensions=None, max_registers=None, opt=True,
                  no_cpython_wrapper=None):
-        if 'no_cpython_wrapper' is not None:
-            print(f"no_cpython_wrapper is {no_cpython_wrapper}")
-
         super().__init__()
 
         self.py_func = py_func
@@ -851,9 +848,6 @@ class StopUsingCCDict(dict):
         return super().__getitem__(key)
 
 
-overload_count = 0
-
-
 class Dispatcher(_dispatcher.Dispatcher, serialize.ReduceMixin):
     '''
     CUDA Dispatcher object. When configured and called, the dispatcher will
@@ -880,7 +874,7 @@ class Dispatcher(_dispatcher.Dispatcher, serialize.ReduceMixin):
         self.specializations = {}
 
         # A mapping of signatures to compile results
-        self._overloads = collections.OrderedDict()
+        self.overloads = collections.OrderedDict()
 
         self.targetoptions = targetoptions
 
@@ -922,54 +916,6 @@ class Dispatcher(_dispatcher.Dispatcher, serialize.ReduceMixin):
             self._can_compile = False
 
         self.pysig = pysig
-
-    @property
-    def overloads(self):
-        #global overload_count
-        #if overload_count == 4:
-        #    breakpoint()
-        #overload_count += 1
-        #print(f"overload access {overload_count}")
-        return self._overloads
-
-    ############# BEGIN _DispatcherBase stuff
-
-    def get_call_template(self, args, kws):
-        """
-        Get a typing.ConcreteTemplate for this dispatcher and the given
-        *args* and *kws* types.  This allows to resolve the return type.
-
-        A (template, pysig, args, kws) tuple is returned.
-        """
-        # XXX how about a dispatcher template class automating the
-        # following?
-
-        # Fold keyword arguments and resolve default values
-        pysig, args = self.pysig, args
-        # self._compiler.fold_argument_types(args, kws)
-
-        kws = {}
-        # Ensure an overload is available
-        if self._can_compile:
-            self.compile(tuple(args))
-
-        # Create function type for typing
-        func_name = self.py_func.__name__
-        name = "CallTemplate({0})".format(func_name)
-        # The `key` isn't really used except for diagnosis here,
-        # so avoid keeping a reference to `cfunc`.
-        call_template = typing.make_concrete_template(
-            name, key=func_name, signatures=self.nopython_signatures)
-        return call_template, pysig, args, kws
-
-    def get_overload(self, sig):
-        """
-        Return the compiled function for the given signature.
-        """
-        args, return_type = sigutils.normalize_signature(sig)
-        return self.overloads[tuple(args)]#.entry_point
-
-    ############# END _DispatcherBase stuff
 
     def configure(self, griddim, blockdim, stream=0, sharedmem=0):
         griddim, blockdim = normalize_kernel_dimensions(griddim, blockdim)

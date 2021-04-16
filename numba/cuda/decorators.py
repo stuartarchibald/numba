@@ -14,9 +14,6 @@ def jitdevice(func, link=[], debug=None, inline=False, opt=True,
               no_cpython_wrapper=None):
     """Wrapper for device-jit.
     """
-    if no_cpython_wrapper is not None:
-        print(f"no_cpython_wrapper (jitdevice) is f{no_cpython_wrapper}")
-
     debug = config.CUDA_DEBUGINFO_DEFAULT if debug is None else debug
     if link:
         raise ValueError("link keyword invalid for device function")

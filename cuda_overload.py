@@ -41,10 +41,10 @@ def ol_baz_cpu():
     return impl
 
 
-#@njit
-#def cpu_foo():
-#    bar()
-#    baz()
+@njit
+def cpu_foo():
+    bar()
+    baz()
 
 @cuda.jit
 def cuda_foo():
@@ -52,7 +52,7 @@ def cuda_foo():
     baz()
 
 print("CPU FOO")
-#cpu_foo()
+cpu_foo()
 
 print("CUDA FOO")
 cuda_foo[1, 1]()
