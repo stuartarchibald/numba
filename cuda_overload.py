@@ -7,7 +7,12 @@ from numba import cuda
 from numba.cuda.compiler import Dispatcher as CUDADispatcher
 
 dispatcher_registry[hardware_registry["cuda"]] = CUDADispatcher
-decorators.jit_registry[hardware_registry["cuda"]] = cuda.jit
+
+def cuda_jit_device(*args, **kwargs):
+    kwargs['device'] = True
+    return cuda.jit(*args, **kwargs)
+
+decorators.jit_registry[hardware_registry["cuda"]] = cuda_jit_device
 
 # ------------------- GET THIS TO WORK
 
@@ -36,10 +41,10 @@ def ol_baz_cpu():
     return impl
 
 
-@njit
-def cpu_foo():
-    bar()
-    baz()
+#@njit
+#def cpu_foo():
+#    bar()
+#    baz()
 
 @cuda.jit
 def cuda_foo():
@@ -47,8 +52,9 @@ def cuda_foo():
     baz()
 
 print("CPU FOO")
-cpu_foo()
+#cpu_foo()
 
 print("CUDA FOO")
 cuda_foo[1, 1]()
 
+cuda.synchronize()
