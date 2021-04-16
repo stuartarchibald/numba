@@ -236,13 +236,11 @@ class DeviceDispatcher(serialize.ReduceMixin):
     """Unmaterialized device function
     """
     def __init__(self, pyfunc, debug, inline, opt):
-        print(f"DeviceDispatcher.__init__({pyfunc})")
         self.py_func = pyfunc
         self.debug = debug
         self.inline = inline
         self.opt = opt
         self._compileinfos = {}
-        self.overloads = {}
         name = getattr(pyfunc, '__name__', 'unknown')
         self.__name__ = f"{name} <CUDA device function>".format(name)
 
@@ -254,12 +252,6 @@ class DeviceDispatcher(serialize.ReduceMixin):
         return compile_device_dispatcher(py_func, debug=debug, inline=inline)
 
     ############# BEGIN _DispatcherBase stuff
-
-    def add_overload(self, cres):
-        args = tuple(cres.signature.args)
-        #sig = [a._code for a in args]
-        #self._insert(sig, cres, cuda=True)
-        self.overloads[args] = cres
 
     def get_call_template(self, args, kws):
         """
@@ -326,8 +318,6 @@ class DeviceDispatcher(serialize.ReduceMixin):
                                                          libs)
             else:
                 cres.target_context.add_user_function(self, cres.fndesc, libs)
-
-            self.add_overload(cres)
 
         else:
             cres = self._compileinfos[args]
