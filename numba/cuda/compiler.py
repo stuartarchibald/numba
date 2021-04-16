@@ -232,10 +232,11 @@ def compile_ptx_for_current_device(pyfunc, args, debug=False, device=False,
                        fastmath=fastmath, cc=cc, opt=True)
 
 
-class DeviceFunctionTemplate(serialize.ReduceMixin):
+class DeviceDispatcher(serialize.ReduceMixin):
     """Unmaterialized device function
     """
     def __init__(self, pyfunc, debug, inline, opt):
+        print(f"DeviceDispatcher.__init__({pyfunc})")
         self.py_func = pyfunc
         self.debug = debug
         self.inline = inline
@@ -249,7 +250,7 @@ class DeviceFunctionTemplate(serialize.ReduceMixin):
 
     @classmethod
     def _rebuild(cls, py_func, debug, inline):
-        return compile_device_template(py_func, debug=debug, inline=inline)
+        return compile_device_dispatcher(py_func, debug=debug, inline=inline)
 
     ############# BEGIN _DispatcherBase stuff
 
@@ -366,20 +367,19 @@ class DeviceFunctionTemplate(serialize.ReduceMixin):
         return ptx
 
 
-def compile_device_template(pyfunc, debug=False, inline=False, opt=True):
-    """Create a DeviceFunctionTemplate object and register the object to
-    the CUDA typing context.
+def compile_device_dispatcher(pyfunc, debug=False, inline=False, opt=True):
+    """Create a DeviceDispatcher and register it to the CUDA typing context.
     """
     from .descriptor import cuda_target
 
-    dft = DeviceFunctionTemplate(pyfunc, debug=debug, inline=inline, opt=opt)
+    dispatcher = DeviceDispatcher(pyfunc, debug=debug, inline=inline, opt=opt)
 
     class device_function_template(AbstractTemplate):
-        key = dft
+        key = dispatcher
 
         def generic(self, args, kws):
             assert not kws
-            return dft.compile(args).signature
+            return dispatcher.compile(args).signature
 
         def get_template_info(cls):
             basepath = os.path.dirname(os.path.dirname(numba.__file__))
@@ -397,8 +397,16 @@ def compile_device_template(pyfunc, debug=False, inline=False, opt=True):
             return info
 
     typingctx = cuda_target.typingctx
-    typingctx.insert_user_function(dft, device_function_template)
-    return dft
+    # For ufuncs / dufuncs, the first argument is an instance of a class
+    # second thing is a type.
+    # Here first arg is an instance of DeviceDispatcher and second is a typing
+    # template.
+    # Docs say:
+    # 1st arg: object used as callee
+    # 2nd arg: something that is a typing template like AbstractTemplate,
+    #          ConcreteTemplate, etc.
+    typingctx.insert_user_function(dispatcher, device_function_template)
+    return dispatcher
 
 
 def compile_device(pyfunc, return_type, args, inline=True, debug=False):

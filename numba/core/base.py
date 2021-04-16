@@ -546,6 +546,7 @@ class BaseContext(object):
         """
         assert sig is not None
         sig = sig.as_function()
+        #breakpoint()
         if isinstance(fn, (types.Function, types.BoundFunction,
                            types.Dispatcher)):
             key = fn.get_impl_key(sig)

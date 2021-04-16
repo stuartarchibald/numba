@@ -1,7 +1,7 @@
 from numba.core import types, config, sigutils
 from numba.core.errors import DeprecationError
 from .compiler import (compile_device, declare_device_function, Dispatcher,
-                       compile_device_template)
+                       compile_device_dispatcher)
 from .simulator.kernel import FakeCUDAKernel
 
 
@@ -17,7 +17,7 @@ def jitdevice(func, link=[], debug=None, inline=False, opt=True,
     debug = config.CUDA_DEBUGINFO_DEFAULT if debug is None else debug
     if link:
         raise ValueError("link keyword invalid for device function")
-    return compile_device_template(func, debug=debug, inline=inline, opt=opt)
+    return compile_device_dispatcher(func, debug=debug, inline=inline, opt=opt)
 
 
 def jit(func_or_sig=None, device=False, inline=False, link=[], debug=None,

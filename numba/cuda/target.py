@@ -70,6 +70,14 @@ class CUDATargetContext(BaseContext):
         else:
             return debuginfo.NvvmDIBuilder
 
+    def insert_user_function(self, *args, **kwargs):
+        print(f'insert_user_function: {args} {kwargs}')
+        super().insert_user_function(*args, **kwargs)
+
+    def add_user_function(self, *args, **kwargs):
+        print(f'add_user_function: {args} {kwargs}')
+        super().add_user_function(*args, **kwargs)
+
     @property
     def enable_boundscheck(self):
         # Unconditionally disabled
