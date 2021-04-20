@@ -16,7 +16,6 @@ from numba.core.compiler_lock import global_compiler_lock
 import numba.core.entrypoints
 from numba.core.cpu_options import (ParallelOptions, FastMathOptions,
                                     InlineOptions)
-from numba.cpython import setobj, listobj
 from numba.np import ufunc_db
 
 # Keep those structures in sync with _dynfunc.c.
@@ -75,6 +74,19 @@ class CPUContext(BaseContext):
         self.lower_extensions[Parfor] = _lower_parfor_parallel
 
     def load_additional_registries(self):
+        # Add implementations that work via import
+        from numba.cpython import (slicing, tupleobj, enumimpl, hashing, heapq,
+                                   iterators, numbers, rangeobj)
+        from numba.core import optional
+        from numba.misc import gdb_hook, literal
+        from numba.np import linalg, polynomial, arraymath
+        from numba.typed import typeddict
+
+        try:
+            from numba.np import npdatetime
+        except NotImplementedError:
+            pass
+
         # Add target specific implementations
         from numba.np import npyimpl
         from numba.cpython import cmathimpl, mathimpl, printimpl, randomimpl
@@ -141,12 +153,14 @@ class CPUContext(BaseContext):
         """
         Build a list from the Numba *list_type* and its initial *items*.
         """
+        from numba.cpython import listobj
         return listobj.build_list(self, builder, list_type, items)
 
     def build_set(self, builder, set_type, items):
         """
         Build a set from the Numba *set_type* and its initial *items*.
         """
+        from numba.cpython import setobj
         return setobj.build_set(self, builder, set_type, items)
 
     def build_map(self, builder, dict_type, item_types, items):
