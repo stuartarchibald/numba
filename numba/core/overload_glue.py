@@ -13,9 +13,11 @@ class _OverloadWrapper(object):
     implementations.
     """
 
-    def __init__(self, function):
+    def __init__(self, function, hardware=None):
         assert function is not None
+        assert hardware is not None
         self._function = function
+        self._hardware = hardware
         self._BIND_TYPES = dict()
         self._selector = None
         self._TYPER = None
@@ -103,9 +105,8 @@ class _OverloadWrapper(object):
     def _build(self):
         from numba.core.extending import overload, intrinsic
 
-        @overload(self._function, strict=False)
+        @overload(self._function, strict=False, hardware=self._hardware)
         def ol_generated(*ol_args, **ol_kwargs):
-
             def body(tyctx):
                 msg = f"No typer registered for {self._function}"
                 if self._TYPER is None:
@@ -161,12 +162,12 @@ class _Gluer:
     def __init__(self):
         self._registered = dict()
 
-    def __call__(self, func):
-        if func in self._registered:
-            return self._registered[func]
+    def __call__(self, func, hardware='cpu'):
+        if (func, hardware) in self._registered:
+            return self._registered[(func, hardware)]
         else:
-            wrapper = _OverloadWrapper(func)
-            self._registered[func] = wrapper
+            wrapper = _OverloadWrapper(func, hardware)
+            self._registered[(func, hardware)] = wrapper
             return wrapper
 
 
@@ -174,15 +175,15 @@ _overload_glue = _Gluer()
 del _Gluer
 
 
-def glue_typing(concrete_function):
+def glue_typing(concrete_function, hardware='cpu'):
     """This is a decorator for wrapping the typing part for a concrete function
     'concrete_function', it's a text-only replacement for '@infer_global'"""
-    return _overload_glue(concrete_function).wrap_typing()
+    return _overload_glue(concrete_function, hardware=hardware).wrap_typing()
 
 
-def glue_lowering(*args):
+def glue_lowering(*args, hardware='cpu'):
     """This is a decorator for wrapping the implementation (lowering) part for
     a concrete function. 'args[0]' is the concrete_function, 'args[1:]' are the
     types the lowering will accept. This acts as a text-only replacement for
     '@lower/@lower_builtin'"""
-    return _overload_glue(args[0]).wrap_impl(*args[1:])
+    return _overload_glue(args[0], hardware=hardware).wrap_impl(*args[1:])

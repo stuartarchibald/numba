@@ -89,7 +89,6 @@ class CPUContext(BaseContext):
         from numba.misc import cffiimpl
         from numba.experimental.jitclass.base import ClassBuilder as \
             jitclassimpl
-        self.install_registry(cmathimpl.registry)
         self.install_registry(cffiimpl.registry)
         self.install_registry(mathimpl.registry)
         self.install_registry(npyimpl.registry)
