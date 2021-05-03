@@ -338,7 +338,7 @@ In 0.55.0:
   not necessarily change as a result.
 
 
-  .. _rocm_unmaintained:
+.. _rocm_unmaintained:
 
 Dropping support for the ROCm target
 ====================================
