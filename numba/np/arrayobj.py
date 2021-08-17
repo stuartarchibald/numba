@@ -33,6 +33,7 @@ from numba.cpython import slicing
 from numba.cpython.unsafe.tuple import tuple_setitem, build_full_slice_tuple
 from numba.core.overload_glue import glue_lowering
 from numba.core.extending import overload_classmethod
+from numba import njit
 
 
 def set_range_metadata(builder, load, lower_bound, upper_bound):
@@ -5441,90 +5442,59 @@ def numpy_swapaxes(arr, axis1, axis2):
     return impl
 
 
-@register_jitable
-def _take_along_axis_impl_set_ni(arr, indices, axis, Ni, Nk):
-    for i in range(len(Ni)):
-        Ni = tuple_setitem(Ni, i, arr.shape[i])
-    return _take_along_axis_impl(arr, indices, axis, Ni, Nk)
-
-
-@register_jitable
-def _take_along_axis_impl_set_nk(arr, indices, axis, Ni, Nk):
-    for i in range(len(Nk)):
-        Nk = tuple_setitem(Nk, i, arr.shape[axis + 1 + i])
-    return _take_along_axis_impl(arr, indices, axis, Ni, Nk)
-
-
-@register_jitable
-def _take_along_axis_impl_set_ni_nk(arr, indices, axis, Ni, Nk):
-    for i in range(len(Ni)):
-        Ni = tuple_setitem(Ni, i, arr.shape[i])
-    for i in range(len(Nk)):
-        Nk = tuple_setitem(Nk, i, arr.shape[axis + 1 + i])
-    return _take_along_axis_impl(arr, indices, axis, Ni, Nk)
-
-
-@register_jitable
+@njit
 def _take_along_axis_impl(arr, indices, axis, Ni, Nk):
-    # Based on example code in
-    # https://numpy.org/doc/stable/reference/generated/numpy.take_along_axis.html
-    J = indices.shape[axis]  # Need not equal M
-    out = np.empty(Ni + (J,) + Nk, arr.dtype)
+    # Based on:
+    # https://github.com/numpy/numpy/blob/v1.21.0/numpy/lib/shape_base.py#L88-L107
+    Nitmp = Ni
+    if len(Ni) > 0:
+        for i in range(len(Nitmp)):
+            Nitmp = tuple_setitem(Nitmp, i, arr.shape[i])
 
-    for ii in np.ndindex(Ni):
-        for ii in np.ndindex(Ni):
-            for kk in np.ndindex(Nk):
-                np_s_ = (slice(None, None, None),)
-                a_1d = arr[ii + np_s_ + kk]
-                indices_1d = indices[ii + np_s_ + kk]
-                out_1d = out[ii + np_s_ + kk]
-                for j in range(J):
-                    out_1d[j] = a_1d[indices_1d[j]]
+    Nktmp = Nk
+    if len(Nk) > 0:
+        for i in range(len(Nktmp)):
+            Nktmp = tuple_setitem(Nktmp, i, arr.shape[axis + 1 + i])
+
+    J = indices.shape[axis]
+    out = np.empty(Nitmp + (J,) + Nktmp, arr.dtype)
+
+    for ii in np.ndindex(Nitmp):
+        for kk in np.ndindex(Nktmp):
+            np_s_ = (slice(None, None, None),)
+            a_1d = arr[ii + np_s_ + kk]
+            indices_1d = indices[ii + np_s_ + kk]
+            out_1d = out[ii + np_s_ + kk]
+            for j in range(J):
+                out_1d[j] = a_1d[indices_1d[j]]
     return out
 
 
-@overload(np.take_along_axis, jit_options={'boundscheck':True})
+@overload(np.take_along_axis)
 def arr_take_along_axis(arr, indices, axis):
+    # Based on:
+    # https://github.com/numpy/numpy/blob/v1.21.0/numpy/lib/shape_base.py#L88-L107
     if is_nonelike(axis):
-        def take_along_axis_impl(arr, indices, axis):
-            return _take_along_axis_impl(arr.flatten(), indices, 0, (), ())
+        axis_val = 0
     else:
         check_is_integer(axis, "axis")
         if not isinstance(axis, types.IntegerLiteral):
-            raise ValueError(
-                "axis must be a literal value (i.e. not an argument) for now"
-            )
-        axis = axis.literal_value
-        if axis < 0:
-            axis = arr.ndim + axis
+            raise ValueError("axis must be a literal value")
+        axis_val = axis.literal_value
 
-        if axis < 0 or axis >= arr.ndim:
-            raise ValueError("axis is out of bounds")
+    if axis_val < 0:
+        axis_val = arr.ndim + axis_val
 
-        Ni = tuple(range(axis))
-        Nk = tuple(range(axis + 1, arr.ndim))
-        # We need to do this rather verbose approach because tuple_setitem on
-        # an empty tuple will fail with a LoweringError. If the code were to
-        # _run_, it would be fine, because tuple_setitem isn't actually ever
-        # called, but we never reach the point where the code can be run.
-        if Ni:
-            if Nk:
-                def take_along_axis_impl(arr, indices, axis):
-                    return _take_along_axis_impl_set_ni_nk(
-                        arr, indices, axis, Ni, Nk
-                    )
-            else:
-                def take_along_axis_impl(arr, indices, axis):
-                    return _take_along_axis_impl_set_ni(
-                        arr, indices, axis, Ni, Nk
-                    )
+    if axis_val < 0 or axis_val >= arr.ndim:
+        raise ValueError("axis is out of bounds")
+
+    Ni = tuple(range(axis_val))
+    Nk = tuple(range(axis_val + 1, arr.ndim))
+
+    def take_along_axis_impl(arr, indices, axis):
+        if axis is None:
+            return _take_along_axis_impl(arr.flatten(), indices, 0, (), ())
         else:
-            if Nk:
-                def take_along_axis_impl(arr, indices, axis):
-                    return _take_along_axis_impl_set_nk(
-                        arr, indices, axis, Ni, Nk
-                    )
-            else:
-                def take_along_axis_impl(arr, indices, axis):
-                    return _take_along_axis_impl(arr, indices, axis, Ni, Nk)
+            return _take_along_axis_impl(arr, indices, axis, Ni, Nk)
+
     return take_along_axis_impl
