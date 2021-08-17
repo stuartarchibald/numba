@@ -591,6 +591,12 @@ def unified_function_type(numba_types, require_precise=True):
     else:
         function = types.UndefinedFunctionType(mnargs, dispatchers)
 
+    # Managed to unify to a FunctionType, mark the dispatchers involved as
+    # non-cacheable
+    for ty in numba_types:
+        if isinstance(ty, types.Dispatcher):
+            ty.cacheable = False
+
     return function
 
 

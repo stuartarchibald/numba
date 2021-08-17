@@ -1237,6 +1237,11 @@ https://numba.pydata.org/numba-doc/latest/user/troubleshoot.html#my-code-has-an-
 
         self.debug.unify_finished(typdict, retty, fntys)
 
+        if isinstance(retty, types.Dispatcher):
+            # Returning a dispatcher, has to be marked as not cacheable else
+            # addresses get baked in
+            retty.cacheable = False
+
         return typdict, retty, fntys
 
     def get_generator_type(self, typdict, retty, raise_errors=True):

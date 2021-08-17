@@ -538,6 +538,7 @@ class Dispatcher(WeakType, Callable, Dummy):
     def __init__(self, dispatcher):
         self._store_object(dispatcher)
         super(Dispatcher, self).__init__("type(%s)" % dispatcher)
+        self._cacheable = True
 
     def dump(self, tab=''):
         print((f'{tab}DUMP {type(self).__name__}[code={self._code}, '
@@ -574,6 +575,14 @@ class Dispatcher(WeakType, Callable, Dummy):
             return disp._get_dispatcher_for_current_target()
         else:
             return disp
+
+    @property
+    def cacheable(self):
+        return self._cacheable
+
+    @cacheable.setter
+    def cacheable(self, cacheable):
+        self._cacheable = cacheable
 
     def get_overload(self, sig):
         """
