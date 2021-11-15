@@ -59,6 +59,7 @@ def process_return(val):
         asint = int(-2)
     return asint
 
+
 # This is a translation of CPython's _Py_HashDouble:
 # https://github.com/python/cpython/blob/d1dd6be613381b996b9071443ef081de8e5f3aff/Python/pyhash.c#L34-L129   # noqa: E501
 # NOTE: In Python 3.10 hash of nan is now hash of the pointer to the PyObject
