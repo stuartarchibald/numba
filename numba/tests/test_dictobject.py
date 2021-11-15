@@ -2123,10 +2123,10 @@ class TestLiteralStrKeyDict(MemoryLeakMixin, TestCase):
             else:
                 a = {'a': 5j, 'c': 'CAT', 'e': np.zeros((5,))}
             # prevents inline of return on py310
-            py310_defeat1 = 1
-            py310_defeat2 = 2
-            py310_defeat3 = 3
-            py310_defeat4 = 4
+            py310_defeat1 = 1  # noqa
+            py310_defeat2 = 2  # noqa
+            py310_defeat3 = 3  # noqa
+            py310_defeat4 = 4  # noqa
             return a['a']
 
         with self.assertRaises(TypingError) as raises:
@@ -2141,10 +2141,10 @@ class TestLiteralStrKeyDict(MemoryLeakMixin, TestCase):
             else:
                 a = {'a': 5j, 'c': 'CAT', 'e': np.zeros((5,))}
             # prevents inline of return on py310
-            py310_defeat1 = 1
-            py310_defeat2 = 2
-            py310_defeat3 = 3
-            py310_defeat4 = 4
+            py310_defeat1 = 1  # noqa
+            py310_defeat2 = 2  # noqa
+            py310_defeat3 = 3  # noqa
+            py310_defeat4 = 4  # noqa
             return a['a']
 
         with self.assertRaises(TypingError) as raises:
