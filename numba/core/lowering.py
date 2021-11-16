@@ -1349,6 +1349,9 @@ class Lower(BaseLower):
             res = self.context.special_ops[expr.op](self, expr)
             return res
 
+        elif expr.op == "POP_BLOCK_INFO":
+            return self.context.get_constant_null(resty)
+
         raise NotImplementedError(expr)
 
     def _alloca_var(self, name, fetype):

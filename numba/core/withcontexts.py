@@ -311,6 +311,7 @@ class _ObjModeContextType(WithContext):
                                        func_globals=func_globals,
                                        func_closures=func_closures,
                                        )
+        typeanns["$cp"] = types.int32
         vlt = func_ir.variable_lifetime
 
         inputs, outputs = find_region_inout_vars(
@@ -327,6 +328,8 @@ class _ObjModeContextType(WithContext):
 
         stripped_outs = list(map(strip_var_ver, outputs))
 
+        if "$cp" in typeanns:
+            del typeanns["$cp"]
         # Verify that only outputs are annotated
         extra_annotated = set(typeanns) - set(stripped_outs)
         if extra_annotated:
@@ -337,6 +340,7 @@ class _ObjModeContextType(WithContext):
             raise errors.TypingError(msg.format(extra_annotated))
 
         # Verify that all outputs are annotated
+        typeanns["$cp"] = types.int32
         not_annotated = set(stripped_outs) - set(typeanns)
         if not_annotated:
             msg = (
