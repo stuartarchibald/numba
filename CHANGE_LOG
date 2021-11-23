@@ -1,3 +1,89 @@
+Version 0.54.0 (19 August, 2021)
+--------------------------------
+
+This release includes a significant number important dependency upgrades along
+with a number of new features and bug fixes.
+
+Highlights of core dependency upgrades:
+
+* Support for Python 3.10
+* Support for NumPy 1.21
+
+Python language support enhancements:
+
+* Experimental support for ``isinstance``.
+
+NumPy features/enhancements:
+
+The following functions are now supported:
+
+* ``np.broadcast_to``
+* ``np.float_power``
+* ``np.cbrt``
+* ``np.logspace``
+* ``np.take_along_axis``
+* ``np.average``
+* ``np.argmin`` gains support for the ``axis`` kwarg.
+* ``np.ndarray.astype`` gains support for types expressed as literal strings.
+
+Highlights of core changes:
+
+* For users of the Numba extension API, Numba now has a new error handling mode
+  whereby it will treat all exceptions that do not inherit from
+  ``numba.errors.NumbaException`` as a "hard error" and immediately unwind the
+  stack. This makes it much easier to debug when writing ``@overload``s etc from
+  the extension API as there's now no confusion between Python errors and Numba
+  errors. This feature can be enabled by setting the environment variable:
+  ``NUMBA_CAPTURED_ERRORS='new_style'``.
+* The threading layer selection priority can now be changed via the environment
+  variable ``NUMBA_THREADING_LAYER_PRIORITY``.
+
+Highlights of changes for the CUDA target:
+
+* Support for NVIDIA's CUDA Python bindings.
+* Streams are provided in the ``Stream.async_done`` result, making it easier to
+  implement asynchronous work queues.
+* Support for structured types in device arrays, character sequences in NumPy
+  arrays, and some array operations on nested arrays.
+* Much underlying refactoring to align the CUDA target more closely with the
+  CPU target, which lays the groudwork for supporting the high level extension
+  API in CUDA in future releases.
+
+Intel also kindly sponsored research and development into native debug (DWARF)
+support and handling per-function compilation flags:
+
+* Line number/location tracking is much improved.
+* Numba's internal representation of containers (e.g. tuples, arrays) are now
+  encoded as structures.
+* Numba's per-function compilation flags are encoded into the ABI field of the
+  mangled name of the function such that it's possible to compile and
+  differentiate between versions of the same function with different flags set.
+
+General deprecation notices:
+
+* There are no new general deprecations.
+
+CUDA target deprecation notices:
+
+* There are no new CUDA target deprecations.
+
+Version support/dependency changes:
+
+* Python 3.10 is supported.
+* NumPy version 1.21 is supported.
+* The minimum supported NumPy version is raised to 1.18 for runtime (compilation
+  however remains compatible with NumPy 1.11).
+
+
+Pull-Requests:
+
+TBC
+
+Authors:
+
+TBC
+
+
 Version 0.54.1 (7 October, 2021)
 --------------------------------
 
