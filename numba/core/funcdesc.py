@@ -9,8 +9,9 @@ from numba.core import types, itanium_mangler
 from numba.core.utils import _dynamic_modname, _dynamic_module
 
 
-def default_mangler(name, argtypes, *, abi_tags=()):
-    return itanium_mangler.mangle(name, argtypes, abi_tags=abi_tags)
+def default_mangler(name, argtypes, *, abi_tags=(), unique_id=None):
+    return itanium_mangler.mangle(name, argtypes, abi_tags=abi_tags,
+                                  unique_id=unique_id)
 
 
 def qualifying_prefix(modname, qualname):
@@ -33,12 +34,12 @@ class FunctionDescriptor(object):
     __slots__ = ('native', 'modname', 'qualname', 'doc', 'typemap',
                  'calltypes', 'args', 'kws', 'restype', 'argtypes',
                  'mangled_name', 'unique_name', 'env_name', 'global_dict',
-                 'inline', 'noalias', 'abi_tags')
+                 'inline', 'noalias', 'abi_tags', 'unique_id')
 
     def __init__(self, native, modname, qualname, unique_name, doc,
                  typemap, restype, calltypes, args, kws, mangler=None,
                  argtypes=None, inline=False, noalias=False, env_name=None,
-                 global_dict=None, abi_tags=()):
+                 global_dict=None, abi_tags=(), unique_id=None):
         self.native = native
         self.modname = modname
         self.global_dict = global_dict
@@ -63,9 +64,9 @@ class FunctionDescriptor(object):
         mangler = default_mangler if mangler is None else mangler
         # The mangled name *must* be unique, else the wrong function can
         # be chosen at link time.
-        qualprefix = qualifying_prefix(self.modname, self.unique_name)
+        qualprefix = qualifying_prefix(self.modname, self.qualname)
         self.mangled_name = mangler(
-            qualprefix, self.argtypes, abi_tags=abi_tags,
+            qualprefix, self.argtypes, abi_tags=abi_tags, unique_id=unique_id
         )
         if env_name is None:
             env_name = mangler(".NumbaEnv.{}".format(qualprefix),
@@ -74,6 +75,7 @@ class FunctionDescriptor(object):
         self.inline = inline
         self.noalias = noalias
         self.abi_tags = abi_tags
+        self.unique_id = unique_id
 
     def lookup_globals(self):
         """
@@ -161,20 +163,23 @@ class FunctionDescriptor(object):
             global_dict = func_ir.func_id.func.__globals__
 
         unique_name = func_ir.func_id.unique_name
+        unique_id = func_ir.func_id.unique_id
 
-        return qualname, unique_name, modname, doc, args, kws, global_dict
+        return (qualname, unique_name, modname, doc, args, kws, global_dict,
+                unique_id)
 
     @classmethod
     def _from_python_function(cls, func_ir, typemap, restype,
                               calltypes, native, mangler=None,
                               inline=False, noalias=False, abi_tags=()):
-        (qualname, unique_name, modname, doc, args, kws, global_dict,
+        (qualname, unique_name, modname, doc, args, kws, global_dict, unique_id,
          ) = cls._get_function_info(func_ir)
 
         self = cls(native, modname, qualname, unique_name, doc,
                    typemap, restype, calltypes,
                    args, kws, mangler=mangler, inline=inline, noalias=noalias,
-                   global_dict=global_dict, abi_tags=abi_tags)
+                   global_dict=global_dict, abi_tags=abi_tags,
+                   unique_id=unique_id)
         return self
 
 
