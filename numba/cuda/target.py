@@ -30,9 +30,9 @@ class CUDATypingContext(typing.BaseContext):
 
     def resolve_value_type(self, val):
         # treat other dispatcher object as another device function
-        from numba.cuda.dispatcher import CUDADispatcher
+        from numba.cuda.dispatcher import CUDADispatcher, CUDADeviceDispatcher
         if (isinstance(val, Dispatcher) and not
-                isinstance(val, CUDADispatcher)):
+                isinstance(val, CUDADeviceDispatcher)):
             try:
                 # use cached device function
                 val = val.__dispatcher
@@ -44,7 +44,7 @@ class CUDATypingContext(typing.BaseContext):
                 targetoptions['device'] = True
                 targetoptions['debug'] = targetoptions.get('debug', False)
                 targetoptions['opt'] = targetoptions.get('opt', True)
-                disp = CUDADispatcher(val.py_func, targetoptions)
+                disp = CUDADeviceDispatcher(val.py_func, targetoptions)
                 # cache the device function for future use and to avoid
                 # duplicated copy of the same function.
                 val.__dispatcher = disp

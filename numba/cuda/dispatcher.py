@@ -474,7 +474,7 @@ class _LaunchConfiguration:
                                     self.stream, self.sharedmem)
 
 
-class CUDADispatcher(Dispatcher, serialize.ReduceMixin):
+class CUDADispatcherBase(Dispatcher, serialize.ReduceMixin):
     '''
     CUDA Dispatcher object. When configured and called, the dispatcher will
     specialize itself for the given arguments (if no suitable specialized
@@ -844,3 +844,11 @@ class CUDADispatcher(Dispatcher, serialize.ReduceMixin):
         """
         return dict(py_func=self.py_func,
                     targetoptions=self.targetoptions)
+
+
+class CUDADispatcher(CUDADispatcherBase):
+    pass
+
+
+class CUDADeviceDispatcher(CUDADispatcherBase):
+    pass
