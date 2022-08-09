@@ -225,6 +225,9 @@ class BaseContext(object):
     # the function descriptor
     fndesc = None
 
+    opt_remarks = None
+
+
     def __init__(self, typing_context, target):
         _load_global_helpers()
 

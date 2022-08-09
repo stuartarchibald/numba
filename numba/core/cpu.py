@@ -263,6 +263,7 @@ _options_mixin = include_default_options(
     "looplift",
     "_nrt",
     "debug",
+    "debuginfo",
     "boundscheck",
     "nogil",
     "no_rewrites",
@@ -277,6 +278,7 @@ _options_mixin = include_default_options(
     "target_backend",
     "_dbg_extend_lifetimes",
     "_dbg_optnone",
+    "opt_remarks"
 )
 
 class CPUTargetOptions(_options_mixin, TargetOptions):

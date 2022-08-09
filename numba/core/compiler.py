@@ -158,6 +158,11 @@ detail""",
              "Equivalent to adding optnone attribute in the LLVM Function.")
     )
 
+    opt_remarks = Option(
+        type=str,
+        default='',
+        doc="Enable recording of optimisation remarks",
+    )
 
 DEFAULT_FLAGS = Flags()
 DEFAULT_FLAGS.nrt = True
@@ -390,6 +395,8 @@ def _make_subtarget(targetctx, flags):
         subtargetoptions['auto_parallel'] = flags.auto_parallel
     if flags.fastmath:
         subtargetoptions['fastmath'] = flags.fastmath
+    if flags.opt_remarks is not None:
+        subtargetoptions['opt_remarks'] = flags.opt_remarks
     error_model = callconv.create_error_model(flags.error_model, targetctx)
     subtargetoptions['error_model'] = error_model
 

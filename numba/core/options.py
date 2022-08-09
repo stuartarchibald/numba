@@ -77,6 +77,7 @@ class DefaultOptions:
     looplift = _mapping("enable_looplift")
     _nrt = _mapping("nrt")
     debug = _mapping("debuginfo")
+    debuginfo = _mapping("debuginfo")
     boundscheck = _mapping("boundscheck")
     nogil = _mapping("release_gil")
 
@@ -94,6 +95,7 @@ class DefaultOptions:
 
     _dbg_extend_lifetimes = _mapping("dbg_extend_lifetimes")
     _dbg_optnone = _mapping("dbg_optnone")
+    opt_remarks = _mapping("opt_remarks")
 
 
 def include_default_options(*args):

@@ -5,6 +5,7 @@ import weakref
 import ctypes
 import html
 import textwrap
+from collections import defaultdict
 
 import llvmlite.binding as ll
 import llvmlite.ir as llvmir
@@ -640,13 +641,15 @@ class CodeLibrary(metaclass=ABCMeta):
 
 class CPUCodeLibrary(CodeLibrary):
 
-    def __init__(self, codegen, name):
+    def __init__(self, codegen, name, opt_remarks=None):
         super().__init__(codegen, name)
         self._linking_libraries = []   # maintain insertion order
         self._final_module = ll.parse_assembly(
             str(self._codegen._create_empty_module(self.name)))
         self._final_module.name = cgutils.normalize_ir_text(self.name)
         self._shared_module = None
+        self._opt_remarks = opt_remarks
+        self._remarks_store = defaultdict(list)
 
     def _optimize_functions(self, ll_module):
         """
@@ -661,7 +664,10 @@ class CPUCodeLibrary(CodeLibrary):
                 k = f"Function passes on {func.name!r}"
                 with self._recorded_timings.record(k):
                     fpm.initialize()
-                    fpm.run(func)
+                    if self._opt_remarks is None:
+                        fpm.run(func)
+                    else:
+                        _, remarks = fpm.run_with_remarks(func, remarks_filter=self._opt_remarks)
                     fpm.finalize()
 
     def _optimize_final_module(self):
@@ -672,14 +678,22 @@ class CPUCodeLibrary(CodeLibrary):
         with self._recorded_timings.record(cheap_name):
             # A cheaper optimisation pass is run first to try and get as many
             # refops into the same function as possible via inlining
-            self._codegen._mpm_cheap.run(self._final_module)
+            if self._opt_remarks is None:
+                self._codegen._mpm_cheap.run(self._final_module)
+            else:
+                _, remarks = self._codegen._mpm_cheap.run_with_remarks(self._final_module, remarks_filter=self._opt_remarks)
+                self._remarks_store['mpm_cheap'].append(remarks)
         # Refop pruning is then run on the heavily inlined function
         if not config.LLVM_REFPRUNE_PASS:
             self._final_module = remove_redundant_nrt_refct(self._final_module)
         full_name = "Module passes (full optimization)"
         with self._recorded_timings.record(full_name):
             # The full optimisation suite is then run on the refop pruned IR
-            self._codegen._mpm_full.run(self._final_module)
+            if self._opt_remarks is None:
+                self._codegen._mpm_full.run(self._final_module)
+            else:
+                _, remarks = self._codegen._mpm_full.run_with_remarks(self._final_module, remarks_filter=self._opt_remarks)
+                self._remarks_store['mpm_full'].append(remarks)
 
     def _get_module_for_linking(self):
         """
