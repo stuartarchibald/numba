@@ -49,7 +49,13 @@ def get_array_index_type(ary, idx):
             pass
         elif isinstance(ty, types.Integer):
             # Normalize integer index
-            ty = types.intp if ty.signed else types.uintp
+            if ty.signed:
+                if ty.domain == types.Domain.POSITIVE:
+                    ty = types.pos_intp
+                else:
+                    ty = types.intp
+            else:
+                ty = types.uintp
             # Integer indexing removes the given dimension
             ndim -= 1
             has_integer = True

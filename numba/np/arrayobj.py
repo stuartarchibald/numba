@@ -146,7 +146,8 @@ def fix_integer_index(context, builder, idxty, idx, size):
     """
     if idxty.signed:
         ind = context.cast(builder, idx, idxty, types.intp)
-        ind = slicing.fix_index(builder, ind, size)
+        if idxty.domain != types.scalars.Domain.POSITIVE:
+            ind = slicing.fix_index(builder, ind, size)
     else:
         ind = context.cast(builder, idx, idxty, types.uintp)
     return ind

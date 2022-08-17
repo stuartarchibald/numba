@@ -46,7 +46,10 @@ int8 = Integer('int8')
 int16 = Integer('int16')
 int32 = Integer('int32')
 int64 = Integer('int64')
+pos_int64 = Integer('pos_int64', bitwidth=64, signed=True, domain=Domain.POSITIVE)
+pos_int32 = Integer('pos_int32', bitwidth=32, signed=True, domain=Domain.POSITIVE)
 intp = int32 if utils.MACHINE_BITS == 32 else int64
+pos_intp = pos_int32 if utils.MACHINE_BITS == 32 else pos_int64
 uintp = uint32 if utils.MACHINE_BITS == 32 else uint64
 intc = int32 if struct.calcsize('i') == 4 else int64
 uintc = uint32 if struct.calcsize('I') == 4 else uint64
@@ -62,9 +65,13 @@ complex128 = Complex('complex128', float64)
 
 range_iter32_type = RangeIteratorType(int32)
 range_iter64_type = RangeIteratorType(int64)
+pos_range_iter32_type = RangeIteratorType(pos_int32)
+pos_range_iter64_type = RangeIteratorType(pos_int64)
 unsigned_range_iter64_type = RangeIteratorType(uint64)
 range_state32_type = RangeType(int32)
 range_state64_type = RangeType(int64)
+pos_range_state32_type = RangeType(pos_int32)
+pos_range_state64_type = RangeType(pos_int64)
 unsigned_range_state64_type = RangeType(uint64)
 
 slice2_type = SliceType('slice<a:b>', 2)

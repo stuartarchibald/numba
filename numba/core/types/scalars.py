@@ -27,9 +27,15 @@ def parse_integer_signed(name):
     return signed
 
 
+class Domain(enum.Enum):
+    POSITIVE = 1
+    NEGATIVE = 2
+    FULL = 3
+
+
 @total_ordering
 class Integer(Number):
-    def __init__(self, name, bitwidth=None, signed=None):
+    def __init__(self, name, bitwidth=None, signed=None, domain=Domain.FULL):
         super(Integer, self).__init__(name)
         if bitwidth is None:
             bitwidth = parse_integer_bitwidth(name)
@@ -37,6 +43,7 @@ class Integer(Number):
             signed = parse_integer_signed(name)
         self.bitwidth = bitwidth
         self.signed = signed
+        self.domain = domain
 
     @classmethod
     def from_bitwidth(cls, bitwidth, signed=True):
@@ -73,6 +80,27 @@ class Integer(Number):
         else:
             return 0
 
+    def unify(self, typingctx, other):
+        """
+        Unify the two number types using NumPy's rules.
+        """
+        from numba.np import numpy_support
+        if isinstance(other, Number):
+            # XXX: this can produce unsafe conversions,
+            # e.g. would unify {int64, uint64} to float64
+            a = numpy_support.as_dtype(self)
+            b = numpy_support.as_dtype(other)
+            sel = np.promote_types(a, b)
+            retty = numpy_support.from_dtype(sel)
+            if isinstance(other, Integer) and self.domain == other.domain:
+                return Integer(retty.name,
+                               bitwidth=retty.bitwidth,
+                               signed=retty.signed,
+                               domain=self.domain)
+            else:
+                return retty
+
+
 
 class IntegerLiteral(Literal, Integer):
     def __init__(self, value):
@@ -84,6 +112,7 @@ class IntegerLiteral(Literal, Integer):
             name=name,
             bitwidth=basetype.bitwidth,
             signed=basetype.signed,
+            domain=(Domain.NEGATIVE if value < 0 else Domain.POSITIVE)
             )
 
     def can_convert_to(self, typingctx, other):

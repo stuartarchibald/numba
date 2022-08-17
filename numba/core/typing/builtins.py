@@ -68,21 +68,26 @@ class Slice(ConcreteTemplate):
     ]
 
 
+
 @infer_global(range, typing_key=range)
 @infer_global(prange, typing_key=prange)
 @infer_global(internal_prange, typing_key=internal_prange)
 class Range(ConcreteTemplate):
+
     cases = [
-        signature(types.range_state32_type, types.int32),
+        signature(types.pos_range_state32_type, types.pos_int32),
+        signature(types.pos_range_state32_type, types.int32),
         signature(types.range_state32_type, types.int32, types.int32),
         signature(types.range_state32_type, types.int32, types.int32,
                   types.int32),
-        signature(types.range_state64_type, types.int64),
+        signature(types.pos_range_state64_type, types.pos_int64),
+        signature(types.pos_range_state64_type, types.int64),
         signature(types.range_state64_type, types.int64, types.int64),
         signature(types.range_state64_type, types.int64, types.int64,
                   types.int64),
         signature(types.unsigned_range_state64_type, types.uint64),
-        signature(types.unsigned_range_state64_type, types.uint64, types.uint64),
+        signature(types.unsigned_range_state64_type, types.uint64,
+                  types.uint64),
         signature(types.unsigned_range_state64_type, types.uint64, types.uint64,
                   types.uint64),
     ]

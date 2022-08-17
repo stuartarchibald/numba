@@ -248,7 +248,7 @@ class Number(Hashable):
 
     def unify(self, typingctx, other):
         """
-        Unify the two number types using Numpy's rules.
+        Unify the two number types using NumPy's rules.
         """
         from numba.np import numpy_support
         if isinstance(other, Number):
