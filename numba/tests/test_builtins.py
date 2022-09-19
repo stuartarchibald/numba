@@ -1620,5 +1620,62 @@ class TestStrAndReprBuiltin(MemoryLeakMixin, TestCase):
             self.assertIn(msg, str(w[0].message))
 
 
+def _check(obj):
+    pass
+
+
+class TestReversedBuiltin(MemoryLeakMixin, TestCase):
+
+    def setUp(self):
+        from numba.extending import overload
+        @overload(_check)
+        def ol_check(obj):
+            self.assertIsInstance(obj, types.Generator)
+            def impl(obj):
+                pass
+            return impl
+        super(TestReversedBuiltin, self).setUp()
+
+    def test_range(self):
+
+        @njit
+        def foo():
+            lst = typed.List()
+            rev = reversed(range(10))
+            for x in rev:
+                lst.append(x)
+            _check(rev)
+            return lst, next(reversed(range(10)))
+
+        self.assertEqual(foo(), foo.py_func())
+
+
+    def test_homogeneous_tuple(self):
+
+        @njit
+        def foo():
+            lst = typed.List()
+            rev = reversed((1, 2, 3, 4, 5,))
+            for x in rev:
+                lst.append(x)
+            _check(rev)
+            return lst, next(reversed((1, 2, 3, 4, 5,)))
+
+        self.assertEqual(foo(), foo.py_func())
+
+    def test_reflected_list(self):
+        # A generator yielding elements of an iterated reflected list leaks, so
+        # this type is banned.
+
+        with self.assertRaises(errors.TypingError) as raises:
+            @njit(())
+            def foo():
+                reversed([1, 2, 3, 4, 5,])
+
+        msg = ("Unsupported use case as reflected lists leak when used in "
+               "generators.")
+        self.assertIn(msg, str(raises.exception))
+
+
 if __name__ == '__main__':
     unittest.main()

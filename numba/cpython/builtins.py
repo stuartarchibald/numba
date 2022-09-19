@@ -1003,3 +1003,39 @@ def ol_str_generic(object=''):
             return repr(object)
     return impl
 
+
+@overload(reversed)
+def ol_reversed_generic(sequence):
+
+    # Import locally to prevent circular import.
+    from numba import njit
+
+    # reversed needs sequence protocol, in this case `__len__()` and
+    # `__getitem__(int >= 0)` support OR the type to implement `__reversed__`.
+    # This manifests at present as types inheriting from Sequence and the
+    # RangeType (which has __reversed__ implemented).
+    if not isinstance(sequence, (types.Sequence, types.RangeType)):
+        return None
+
+    if isinstance(sequence, types.List):
+        msg = ("Unsupported use case as reflected lists leak when used in "
+               "generators.")
+        raise TypingError(msg)
+
+    @njit
+    def reversed_gen(sequence):
+        # Generic reversed impl, explicitly call `__reversed__` on range
+        # to close out an otherwise recursive type inference loop.
+        for i in range(len(sequence)).__reversed__():
+            yield sequence[i]
+
+    def impl(sequence):
+        attr = '__reversed__'
+        if hasattr(sequence, attr) == True:
+            return getattr(sequence, attr)()
+        else:
+            # This has to be pulled out as a separate function call as the
+            # returned item has to be a generator which does stack manipulation
+            # and ends up segfaulting if defined in this function.
+            return reversed_gen(sequence)
+    return impl

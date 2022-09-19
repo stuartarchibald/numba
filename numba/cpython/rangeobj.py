@@ -11,7 +11,8 @@ from numba.np.arrayobj import make_array
 from numba.core.imputils import (lower_builtin, lower_cast,
                                     iterator_impl, impl_ret_untracked)
 from numba.core.typing import signature
-from numba.core.extending import intrinsic, overload, overload_attribute, register_jitable
+from numba.core.extending import (intrinsic, overload, overload_attribute,
+                                  register_jitable, overload_method)
 from numba.parfors.parfor import internal_prange
 
 def make_range_iterator(typ):
@@ -297,3 +298,27 @@ def impl_contains(robj, val):
 
 for ix, attr in enumerate(('start', 'stop', 'step')):
     make_range_attr(index=ix, attribute=attr)
+
+
+@overload_method(types.RangeType, '__reversed__',)
+def ol_range_reversed(robj):
+    from numba import njit
+
+    @njit
+    def range_iterator(robj):
+        n = len(robj)
+        start = robj.start
+        stop = robj.stop
+        step = robj.step
+        for x in range(start + (n - 1) * step, start - step, -step):
+            yield x
+
+    def impl(robj):
+        # This needs to return a `range_iterator` but the Numba impl of such a
+        # type is stack based, so return a generator that behaves the same way.
+        # In : reversed(range(5))
+        # Out: <range_iterator at 0x7f89f1d5a870>
+        return range_iterator(robj)
+
+    return impl
+
