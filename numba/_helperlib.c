@@ -895,11 +895,9 @@ int reraise_exc_is_none(void) {
 
 #if (PY_MAJOR_VERSION >= 3) && (PY_MINOR_VERSION >= 11)
     /* intentionally empty */
-#elif (PY_MAJOR_VERSION >= 3) && (PY_MINOR_VERSION >= 7)
+#else
     PyThreadState *tstate = PyThreadState_GET();
     _PyErr_StackItem *tstate_exc = tstate->exc_info;
-#else
-    PyThreadState *tstate_exc = tstate;
 #endif
 
 #if (PY_MAJOR_VERSION >= 3) && (PY_MINOR_VERSION >= 11)

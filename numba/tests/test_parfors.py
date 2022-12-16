@@ -27,7 +27,7 @@ import numba.parfors.parfor
 from numba import (njit, prange, parallel_chunksize,
                    get_parallel_chunksize, set_parallel_chunksize,
                    set_num_threads, get_num_threads, typeof)
-from numba.core import (types, utils, typing, errors, ir, rewrites,
+from numba.core import (types, typing, errors, ir, rewrites,
                         typed_passes, inline_closurecall, config, compiler, cpu)
 from numba.extending import (overload_method, register_model,
                              typeof_impl, unbox, NativeValue, models)
@@ -3366,7 +3366,6 @@ class TestPrangeBase(TestParforsBase):
                 new_code[idx] = prange_idx
             new_code = bytes(new_code)
 
-        # create new code parts
         # create code object with prange mutation
         prange_code = pyfunc_code.replace(co_code=new_code,
                                           co_names=prange_names)

@@ -26,6 +26,7 @@ from contextlib import contextmanager
 import uuid
 import importlib
 import types as pytypes
+from functools import cached_property
 
 import numpy as np
 
@@ -68,10 +69,6 @@ is_parfors_unsupported = _32bit
 skip_parfors_unsupported = unittest.skipIf(
     is_parfors_unsupported,
     'parfors not supported',
-)
-skip_py38_or_later = unittest.skipIf(
-    utils.PYVERSION >= (3, 8),
-    "unsupported on py3.8 or later"
 )
 
 skip_unless_py10_or_later = unittest.skipUnless(
@@ -213,7 +210,7 @@ class TestCase(unittest.TestCase):
 
     # A random state yielding the same random numbers for any test case.
     # Use as `self.random.<method name>`
-    @utils.cached_property
+    @cached_property
     def random(self):
         return np.random.RandomState(42)
 
