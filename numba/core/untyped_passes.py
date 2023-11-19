@@ -1068,7 +1068,7 @@ class MixedContainerUnroller(FunctionPass):
                 raise GuardException
             return some_call
 
-        for lbl, loop in loops.items():
+        for lbl, loop in sorted(loops.items()):
             # TODO: check the loop head has literal_unroll, if it does but
             # does not conform to the following then raise
 
